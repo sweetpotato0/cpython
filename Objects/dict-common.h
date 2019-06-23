@@ -42,6 +42,7 @@ struct _dictkeysobject {
     dict_lookup_func dk_lookup;
 
     /* Number of usable entries in dk_entries. */
+    // 未使用的数目，每次插入一个值时候，都会-1，删除不会+1，而是使 entry 变为 dummy
     Py_ssize_t dk_usable;
 
     /* Number of used entries in dk_entries. */

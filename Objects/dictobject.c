@@ -702,6 +702,7 @@ PyDict_New(void)
 }
 
 /* Search index of hash table from offset of entry table */
+// 获取 dk_entries 中 哈希为 hash，位置为 index 处的数据
 static Py_ssize_t
 lookdict_index(PyDictKeysObject *k, Py_hash_t hash, Py_ssize_t index)
 {
@@ -997,16 +998,19 @@ _PyDict_MaybeUntrack(PyObject *op)
    when it is known that the key is not present in the dict.
 
    The dict must be combined. */
+// 获取一个新的可用空间
 static Py_ssize_t
 find_empty_slot(PyDictKeysObject *keys, Py_hash_t hash)
 {
     assert(keys != NULL);
 
     const size_t mask = DK_MASK(keys);
-    size_t i = hash & mask;
+    size_t i = hash & mask; // 将 hash 映射到 dk_indices 上
     Py_ssize_t ix = dk_get_index(keys, i);
+    // 处理 hash 冲突
     for (size_t perturb = hash; ix >= 0;) {
         perturb >>= PERTURB_SHIFT;
+        // => ((i << 2) + i + perturb + 1) & mask， 刚好可以遍历所有元素
         i = (i*5 + perturb + 1) & mask;
         ix = dk_get_index(keys, i);
     }
@@ -1033,6 +1037,7 @@ insertdict(PyDictObject *mp, PyObject *key, Py_hash_t hash, PyObject *value)
     Py_INCREF(key);
     Py_INCREF(value);
     if (mp->ma_values != NULL && !PyUnicode_CheckExact(key)) {
+        // 调整大小，保证2/3的装载率
         if (insertion_resize(mp) < 0)
             goto Fail;
     }
@@ -1143,6 +1148,7 @@ a combined table, then the me_value slots in the old table are NULLed out.
 After resizing a table is always combined,
 but can be resplit by make_keys_shared().
 */
+// 调整 hash 表，调整后的 table 是一个联合 table
 static int
 dictresize(PyDictObject *mp, Py_ssize_t minsize)
 {
@@ -1152,6 +1158,7 @@ dictresize(PyDictObject *mp, Py_ssize_t minsize)
     PyDictKeyEntry *oldentries, *newentries;
 
     /* Find the smallest table size > minused. */
+    // newsize 每次 x2 增长
     for (newsize = PyDict_MINSIZE;
          newsize < minsize && newsize > 0;
          newsize <<= 1)
@@ -1169,6 +1176,7 @@ dictresize(PyDictObject *mp, Py_ssize_t minsize)
      */
 
     /* Allocate a new table. */
+    // 重新创建一个newsize 大小的 ma_keys
     mp->ma_keys = new_keys_object(newsize);
     if (mp->ma_keys == NULL) {
         mp->ma_keys = oldkeys;
@@ -1176,18 +1184,20 @@ dictresize(PyDictObject *mp, Py_ssize_t minsize)
     }
     // New table must be large enough.
     assert(mp->ma_keys->dk_usable >= mp->ma_used);
+    // 查找函数迁移
     if (oldkeys->dk_lookup == lookdict)
         mp->ma_keys->dk_lookup = lookdict;
 
     numentries = mp->ma_used;
-    oldentries = DK_ENTRIES(oldkeys);
-    newentries = DK_ENTRIES(mp->ma_keys);
+    oldentries = DK_ENTRIES(oldkeys);     // 老的 dk_entries 其实地址
+    newentries = DK_ENTRIES(mp->ma_keys); // 新的 dk_entries 其实地址
     oldvalues = mp->ma_values;
     if (oldvalues != NULL) {
         /* Convert split table into new combined table.
          * We must incref keys; we can transfer values.
          * Note that values of split table is always dense.
          */
+        // 将老的数据迁移到新的内存中，新的是一个联合 table
         for (Py_ssize_t i = 0; i < numentries; i++) {
             assert(oldvalues[i] != NULL);
             PyDictKeyEntry *ep = &oldentries[i];
@@ -1206,11 +1216,13 @@ dictresize(PyDictObject *mp, Py_ssize_t minsize)
     }
     else {  // combined table.
         if (oldkeys->dk_nentries == numentries) {
+            // 将老数据 oldentries，迁移到新地址中
             memcpy(newentries, oldentries, numentries * sizeof(PyDictKeyEntry));
         }
         else {
             PyDictKeyEntry *ep = oldentries;
             for (Py_ssize_t i = 0; i < numentries; i++) {
+                // ep 不为 NULL 的时候进行赋值到新的地址中
                 while (ep->me_value == NULL)
                     ep++;
                 newentries[i] = *ep++;
@@ -1219,6 +1231,7 @@ dictresize(PyDictObject *mp, Py_ssize_t minsize)
 
         assert(oldkeys->dk_lookup != lookdict_split);
         assert(oldkeys->dk_refcnt == 1);
+        // 老的数据放到缓存中去还是释放
         if (oldkeys->dk_size == PyDict_MINSIZE &&
             numfreekeys < PyDict_MAXFREELIST) {
             DK_DEBUG_DECREF keys_free_list[numfreekeys++] = oldkeys;
@@ -1516,6 +1529,7 @@ _PyDict_SetItem_KnownHash(PyObject *op, PyObject *key, PyObject *value,
     return insertdict(mp, key, hash, value);
 }
 
+// 删除 hash并且位置为 ix 的数据
 static int
 delitem_common(PyDictObject *mp, Py_hash_t hash, Py_ssize_t ix,
                PyObject *old_value)
@@ -1523,14 +1537,17 @@ delitem_common(PyDictObject *mp, Py_hash_t hash, Py_ssize_t ix,
     PyObject *old_key;
     PyDictKeyEntry *ep;
 
+    // 查找 hash 并且位置为 ix 的数据在 entries 中的位置
     Py_ssize_t hashpos = lookdict_index(mp->ma_keys, hash, ix);
     assert(hashpos >= 0);
 
     mp->ma_used--;
     mp->ma_version_tag = DICT_NEXT_VERSION();
     ep = &DK_ENTRIES(mp->ma_keys)[ix];
+    // 删除我们这里将 indices 对应的位置设置为 DKIX_DUMMY
     dk_set_index(mp->ma_keys, hashpos, DKIX_DUMMY);
     ENSURE_ALLOWS_DELETIONS(mp);
+    // 删除我们不会讲对应的 ep 进行删除，而是将对应位置设置 DKIX_DUMMY
     old_key = ep->me_key;
     ep->me_key = NULL;
     ep->me_value = NULL;
@@ -1579,6 +1596,7 @@ _PyDict_DelItem_KnownHash(PyObject *op, PyObject *key, Py_hash_t hash)
     }
 
     // Split table doesn't allow deletion.  Combine it.
+    // 分离 table 不允许删除。这里需要转化
     if (_PyDict_HasSplitTable(mp)) {
         if (dictresize(mp, DK_SIZE(mp->ma_keys))) {
             return -1;
