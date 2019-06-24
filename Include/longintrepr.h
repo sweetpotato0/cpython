@@ -82,8 +82,20 @@ typedef long stwodigits; /* signed variant of twodigits */
    aware that ints abuse  ob_size's sign bit.
 */
 
+// 一个数的绝对值 = sum(for i=0 直到 i=abs(ob_size)-1) ob_digit[i] * 2**(SHIFT*i)
+// sum = 0
+// for i in abs(ob_size) - 1:
+//     sum += ob_digit[i] * 2**(SHIFT*i)
+//
+// PyObject_VAR_HEAD =
+//    PyObject ob_base;
+//    Py_ssize_t ob_size;
+// ob_size < 0 为负数
+// ob_size == 0 为 0
+// ob_size > 0 时，数据正常。此时 ob_digit 的位数为 ob_size
+//
 struct _longobject {
-    PyObject_VAR_HEAD
+    PyObject_VAR_HEAD // 变长对象
     digit ob_digit[1];
 };
 

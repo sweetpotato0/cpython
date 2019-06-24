@@ -104,15 +104,15 @@ whose size is determined when the object is allocated.
  * in addition, be cast to PyVarObject*.
  */
 typedef struct _object {
-    _PyObject_HEAD_EXTRA
-    Py_ssize_t ob_refcnt;
-    struct _typeobject *ob_type;
+    _PyObject_HEAD_EXTRA   // 一个双联表，GC 会用到
+    Py_ssize_t ob_refcnt;  // 引用计数
+    struct _typeobject *ob_type;  // 类型指针
 } PyObject;
 
 typedef struct {
     PyObject ob_base;
     Py_ssize_t ob_size; /* Number of items in variable part */
-} PyVarObject;
+} PyVarObject;  // 用于不定长对象
 
 #define Py_REFCNT(ob)           (((PyObject*)(ob))->ob_refcnt)
 #define Py_TYPE(ob)             (((PyObject*)(ob))->ob_type)
@@ -346,8 +346,8 @@ typedef struct _typeobject PyTypeObject; /* opaque */
 #else
 typedef struct _typeobject {
     PyObject_VAR_HEAD
-    const char *tp_name; /* For printing, in format "<module>.<name>" */
-    Py_ssize_t tp_basicsize, tp_itemsize; /* For allocation */
+    const char *tp_name; /* For printing, in format "<module>.<name>" */  //类型名称，用于 printing
+    Py_ssize_t tp_basicsize, tp_itemsize; /* For allocation */  // 创建时候分配的大小信息
 
     /* Methods to implement standard operations */
 
@@ -360,7 +360,7 @@ typedef struct _typeobject {
     reprfunc tp_repr;
 
     /* Method suites for standard classes */
-
+    // 标准类的方法集
     PyNumberMethods *tp_as_number;
     PySequenceMethods *tp_as_sequence;
     PyMappingMethods *tp_as_mapping;

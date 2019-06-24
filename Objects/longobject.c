@@ -15,6 +15,7 @@ class int "PyObject *" "&PyLong_Type"
 [clinic start generated code]*/
 /*[clinic end generated code: output=da39a3ee5e6b4b0d input=ec0275e3422a36e3]*/
 
+// 小对象定义 [-5, 257)
 #ifndef NSMALLPOSINTS
 #define NSMALLPOSINTS           257
 #endif
@@ -40,6 +41,7 @@ PyObject *_PyLong_One = NULL;
    The integers that are preallocated are those in the range
    -NSMALLNEGINTS (inclusive) to NSMALLPOSINTS (not inclusive).
 */
+// 小整数池 small_ints
 static PyLongObject small_ints[NSMALLNEGINTS + NSMALLPOSINTS];
 #ifdef COUNT_ALLOCS
 Py_ssize_t quick_int_allocs, quick_neg_int_allocs;
@@ -211,6 +213,7 @@ _PyLong_New(Py_ssize_t size)
         PyErr_NoMemory();
         return NULL;
     }
+    // PyObject_INIT_VAR(op, typeobj, size) =>  Py_SIZE(op) = (size), PyObject_INIT((op), (typeobj))
     return (PyLongObject*)PyObject_INIT_VAR(result, &PyLong_Type, size);
 }
 
@@ -248,6 +251,7 @@ PyLong_FromLong(long ival)
     int ndigits = 0;
     int sign;
 
+    // 小整数
     CHECK_SMALL_INT(ival);
 
     if (ival < 0) {
@@ -261,6 +265,7 @@ PyLong_FromLong(long ival)
         sign = ival == 0 ? 0 : 1;
     }
 
+    // 普通整数
     /* Fast path for single-digit ints */
     if (!(abs_ival >> PyLong_SHIFT)) {
         v = _PyLong_New(1);
@@ -271,6 +276,8 @@ PyLong_FromLong(long ival)
         }
         return (PyObject*)v;
     }
+
+    // 下面是其他整数
 
 #if PyLong_SHIFT==15
     /* 2 digits */
@@ -299,8 +306,9 @@ PyLong_FromLong(long ival)
         Py_SIZE(v) = ndigits*sign;
         t = abs_ival;
         while (t) {
+            // PyLong_MASK = (1 << PyLong_SHIFT - 1)
             *p++ = Py_SAFE_DOWNCAST(
-                t & PyLong_MASK, unsigned long, digit);
+                t & PyLong_MASK, unsigned long, digit);  // => (digit)(t&PyLong_MASK)
             t >>= PyLong_SHIFT;
         }
     }
@@ -308,7 +316,7 @@ PyLong_FromLong(long ival)
 }
 
 /* Create a new int object from a C unsigned long int */
-
+// 根据一个 C unsigned long int 创建一个 int 对象
 PyObject *
 PyLong_FromUnsignedLong(unsigned long ival)
 {
@@ -316,6 +324,7 @@ PyLong_FromUnsignedLong(unsigned long ival)
     unsigned long t;
     int ndigits = 0;
 
+    // 当小于 1 << PyLong_SHIFT 时候
     if (ival < PyLong_BASE)
         return PyLong_FromLong(ival);
     /* Count the number of Python digits. */

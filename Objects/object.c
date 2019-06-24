@@ -1717,6 +1717,7 @@ notimplemented_dealloc(PyObject* ignore)
     Py_FatalError("deallocating NotImplemented");
 }
 
+// 没有实现的类型
 PyTypeObject _PyNotImplemented_Type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     "NotImplementedType",
@@ -1766,6 +1767,8 @@ PyObject _Py_NotImplementedStruct = {
 void
 _Py_ReadyTypes(void)
 {
+    // PyAPI_FUNC(int) PyType_Ready(PyTypeObject *);
+    // define PyAPI_FUNC(RTYPE) RTYPE
     if (PyType_Ready(&PyBaseObject_Type) < 0)
         Py_FatalError("Can't initialize object type");
 

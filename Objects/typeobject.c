@@ -3574,7 +3574,7 @@ type_is_gc(PyTypeObject *type)
 }
 
 PyTypeObject PyType_Type = {
-    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)      // 0, 0, 1, &PyType_Type, 0
     "type",                                     /* tp_name */
     sizeof(PyHeapTypeObject),                   /* tp_basicsize */
     sizeof(PyMemberDef),                        /* tp_itemsize */
@@ -4747,6 +4747,7 @@ static PyMethodDef object_methods[] = {
 };
 
 
+// base object 类型对象
 PyTypeObject PyBaseObject_Type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)
     "object",                                   /* tp_name */
@@ -4791,7 +4792,7 @@ PyTypeObject PyBaseObject_Type = {
 
 
 /* Add the methods from tp_methods to the __dict__ in a type object */
-
+// 给对象 type 添加方法集 meth
 static int
 add_methods(PyTypeObject *type, PyMethodDef *meth)
 {
@@ -4838,6 +4839,7 @@ add_methods(PyTypeObject *type, PyMethodDef *meth)
     return 0;
 }
 
+// 给对象添加对应的成员集 PyMemberDef
 static int
 add_members(PyTypeObject *type, PyMemberDef *memb)
 {
@@ -4859,6 +4861,7 @@ add_members(PyTypeObject *type, PyMemberDef *memb)
     return 0;
 }
 
+// 给对象 type 添加 setter、getter 集
 static int
 add_getset(PyTypeObject *type, PyGetSetDef *gsp)
 {
@@ -4881,6 +4884,7 @@ add_getset(PyTypeObject *type, PyGetSetDef *gsp)
     return 0;
 }
 
+// 从 base 种继承一些特别的属性
 static void
 inherit_special(PyTypeObject *type, PyTypeObject *base)
 {
@@ -4958,6 +4962,7 @@ overrides_hash(PyTypeObject *type)
     return 0;
 }
 
+// type 继承 base 相关的方法集
 static void
 inherit_slots(PyTypeObject *type, PyTypeObject *base)
 {
@@ -5132,6 +5137,7 @@ inherit_slots(PyTypeObject *type, PyTypeObject *base)
 
 static int add_operators(PyTypeObject *);
 
+// 把传入的type的tp_base用 &PyBaseObject_Type 初始化
 int
 PyType_Ready(PyTypeObject *type)
 {
@@ -5139,12 +5145,14 @@ PyType_Ready(PyTypeObject *type)
     PyTypeObject *base;
     Py_ssize_t i, n;
 
+    // 判断是否准备好
     if (type->tp_flags & Py_TPFLAGS_READY) {
         assert(_PyType_CheckConsistency(type));
         return 0;
     }
     assert((type->tp_flags & Py_TPFLAGS_READYING) == 0);
 
+    // 将 readying 位 设置为1
     type->tp_flags |= Py_TPFLAGS_READYING;
 
 #ifdef Py_TRACE_REFS
@@ -5163,6 +5171,7 @@ PyType_Ready(PyTypeObject *type)
     }
 
     /* Initialize tp_base (defaults to BaseObject unless that's us) */
+    // 初始化 tp_base，默认使用 PyBaseObject_Type 进行初始化
     base = type->tp_base;
     if (base == NULL && type != &PyBaseObject_Type) {
         base = type->tp_base = &PyBaseObject_Type;
@@ -5174,6 +5183,7 @@ PyType_Ready(PyTypeObject *type)
      */
 
     /* Initialize the base class */
+    // 递归初始化 base 的基类
     if (base != NULL && base->tp_dict == NULL) {
         if (PyType_Ready(base) < 0)
             goto error;
@@ -7423,6 +7433,7 @@ recurse_down_subclasses(PyTypeObject *type, PyObject *name,
    slot that calls the method from the dictionary, and we want to avoid
    infinite recursion here.) */
 
+// 注入对应的 perator ，比如：__getattribute__、__cal__ 等
 static int
 add_operators(PyTypeObject *type)
 {

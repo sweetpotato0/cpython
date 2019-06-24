@@ -21,14 +21,15 @@ typedef struct _dictkeysobject PyDictKeysObject;
  * or points to an array of PyObject* for a split table
  */
 typedef struct {
-    PyObject_HEAD
+    PyObject_HEAD // =>  PyObject ob_base
 
     /* Number of items in the dictionary */
+    // 字典元素的数量
     Py_ssize_t ma_used;
 
     /* Dictionary version: globally unique, value change each time
        the dictionary is modified */
-    uint64_t ma_version_tag;
+    uint64_t ma_version_tag;  // 字典有更改，会变化
 
     PyDictKeysObject *ma_keys;
 
@@ -37,6 +38,9 @@ typedef struct {
 
        If ma_values is not NULL, the table is splitted:
        keys are stored in ma_keys and values are stored in ma_values */
+    // 如果 ma_values = NULL，则这个字典是 联合字典： keys、values 都存储在 ma_keys 中
+    // 如果 ma_values != NULL, 则这个是 分离字典：keys 存储在 max_keys 中，key都是字符串
+    //  values 存储在 ma_values 中
     PyObject **ma_values;
 } PyDictObject;
 

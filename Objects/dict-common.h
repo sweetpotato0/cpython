@@ -1,11 +1,12 @@
 #ifndef Py_DICT_COMMON_H
 #define Py_DICT_COMMON_H
 
+// 关联容器的 entry
 typedef struct {
     /* Cached hash code of me_key. */
-    Py_hash_t me_hash;
-    PyObject *me_key;
-    PyObject *me_value; /* This field is only meaningful for combined tables */
+    Py_hash_t me_hash;  // 对应的 hash 值
+    PyObject *me_key;   // 对应的 key 值
+    PyObject *me_value; // 对应的 value /* This field is only meaningful for combined tables */
 } PyDictKeyEntry;
 
 /* dict_lookup_func() returns index of entry which can be used like DK_ENTRIES(dk)[index].
@@ -20,7 +21,7 @@ typedef Py_ssize_t (*dict_lookup_func)
 
 /* See dictobject.c for actual layout of DictKeysObject */
 struct _dictkeysobject {
-    Py_ssize_t dk_refcnt;
+    Py_ssize_t dk_refcnt;  // 引用计数
 
     /* Size of the hash table (dk_indices). It must be a power of 2. */
     Py_ssize_t dk_size;
@@ -41,6 +42,7 @@ struct _dictkeysobject {
     dict_lookup_func dk_lookup;
 
     /* Number of usable entries in dk_entries. */
+    // 未使用的数目，每次插入一个值时候，都会-1，删除不会+1，而是使 entry 变为 dummy
     Py_ssize_t dk_usable;
 
     /* Number of used entries in dk_entries. */
