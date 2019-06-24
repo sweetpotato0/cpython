@@ -166,11 +166,11 @@ NB: the methods for certain type groups are now contained in separate
 method blocks.
 */
 
-typedef PyObject * (*unaryfunc)(PyObject *);
-typedef PyObject * (*binaryfunc)(PyObject *, PyObject *);
-typedef PyObject * (*ternaryfunc)(PyObject *, PyObject *, PyObject *);
+typedef PyObject * (*unaryfunc)(PyObject *);  // 1个元素的操作
+typedef PyObject * (*binaryfunc)(PyObject *, PyObject *);  // 2个元素的操作
+typedef PyObject * (*ternaryfunc)(PyObject *, PyObject *, PyObject *);  // 3个元素的操作
 typedef int (*inquiry)(PyObject *);
-typedef Py_ssize_t (*lenfunc)(PyObject *);
+typedef Py_ssize_t (*lenfunc)(PyObject *);  // 长度计算相关函数
 typedef PyObject *(*ssizeargfunc)(PyObject *, Py_ssize_t);
 typedef PyObject *(*ssizessizeargfunc)(PyObject *, Py_ssize_t, Py_ssize_t);
 typedef int(*ssizeobjargproc)(PyObject *, Py_ssize_t, PyObject *);
@@ -237,6 +237,7 @@ typedef int (*visitproc)(PyObject *, void *);
 typedef int (*traverseproc)(PyObject *, visitproc, void *);
 
 #ifndef Py_LIMITED_API
+// 针对数字使用的一些方法集
 typedef struct {
     /* Number implementations must check *both*
        arguments for proper type and implement the necessary conversions
@@ -376,6 +377,7 @@ typedef struct _typeobject {
     PyBufferProcs *tp_as_buffer;
 
     /* Flags to define presence of optional/expanded features */
+    // 用于定义可选/扩展功能存在的标志
     unsigned long tp_flags;
 
     const char *tp_doc; /* Documentation string */
