@@ -1548,6 +1548,8 @@ none_dealloc(PyObject* ignore)
     Py_FatalError("deallocating None");
 }
 
+// typedef PyObject *(*newfunc)(struct _typeobject *, PyObject *, PyObject *);
+// None 创建函数
 static PyObject *
 none_new(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
@@ -1564,6 +1566,7 @@ none_bool(PyObject *v)
     return 0;
 }
 
+// none作为数字计算相关方法集
 static PyNumberMethods none_as_number = {
     0,                          /* nb_add */
     0,                          /* nb_subtract */
@@ -1602,7 +1605,27 @@ static PyNumberMethods none_as_number = {
 };
 
 PyTypeObject _PyNone_Type = {
-    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    // #define _PyObject_HEAD_EXTRA   \
+    //     struct _object *_ob_next;  \
+    //     struct _object *_ob_prev;
+
+    // typedef struct _object {
+    //     _PyObject_HEAD_EXTRA
+    //     Py_ssize_t ob_refcnt;
+    //     struct _typeobject *ob_type;
+    // } PyObject;
+
+    // typedef struct {
+    //     PyObject ob_base;
+    //     Py_ssize_t ob_size; /* Number of items in variable part */
+    // } PyVarObject;
+
+    // PyVarObject ob_base = {0, 0, 1, &PyType_Type}
+    // PyObject_VAR_HEAD = PyVarObject = { {0, 0, 1, &PyType_Type}, 0 } = {
+    //     PyObject ob_base = {_ob_next=0, _ob_prev=0, ob_refcnt=1, ob_type=&PyType_Type},
+    //     Py_ssize_t ob_size = 0
+    // }
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)  // 头部 PyVarObject 对象初始化
     "NoneType",
     0,
     0,
@@ -1662,6 +1685,14 @@ NotImplemented_reduce(PyObject *op)
     return PyUnicode_FromString("NotImplemented");
 }
 
+// typedef PyObject *(*PyCFunction)(PyObject *, PyObject *);
+// struct PyMethodDef {
+//     char        *ml_name;
+//     PyCFunction  ml_meth;
+//     int          ml_flags;
+//     char        *ml_doc;
+// };
+// typedef struct PyMethodDef PyMethodDef;
 static PyMethodDef notimplemented_methods[] = {
     {"__reduce__", (PyCFunction)NotImplemented_reduce, METH_NOARGS, NULL},
     {NULL, NULL}
