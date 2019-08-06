@@ -3233,10 +3233,12 @@ dict_init(PyObject *self, PyObject *args, PyObject *kwds)
     return dict_update_common(self, args, kwds, "dict");
 }
 
+// 字典迭代器
 static PyObject *
 dict_iter(PyDictObject *dict)
 {
     // 获取 PyDictIterKey_Type 类型的迭代对象
+    // 默认是 PyDictIterKey_Type 类型
     return dictiter_new(dict, &PyDictIterKey_Type);
 }
 
@@ -3369,14 +3371,14 @@ PyDict_DelItemString(PyObject *v, const char *key)
 }
 
 /* Dictionary iterator types */
-
+// 迭代对象
 typedef struct {
     PyObject_HEAD
-    PyDictObject *di_dict; /* Set to NULL when iterator is exhausted */
-    Py_ssize_t di_used;
-    Py_ssize_t di_pos;
-    PyObject* di_result; /* reusable result tuple for iteritems */
-    Py_ssize_t len;
+    PyDictObject *di_dict; /* Set to NULL when iterator is exhausted */  // 保存相关的字典对象
+    Py_ssize_t di_used; // 字典使用的空间
+    Py_ssize_t di_pos;  // 遍历时候下一个位置，默认0开始
+    PyObject* di_result; /* reusable result tuple for iteritems */  // 用来遍历 items 的时候存放当前 items 的值（一个遍历的时候复用这个对象来存储）
+    Py_ssize_t len;  // 当前剩余可遍历的字典元素长度（最开始就是字典元素个数）
 } dictiterobject;
 
 // 获取迭代对象
@@ -3390,7 +3392,7 @@ dictiter_new(PyDictObject *dict, PyTypeObject *itertype)
     Py_INCREF(dict);
     di->di_dict = dict;
     di->di_used = dict->ma_used;
-    di->di_pos = 0;
+    di->di_pos = 0;  // 0 开始
     di->len = dict->ma_used;
     if (itertype == &PyDictIterItem_Type) {
         di->di_result = PyTuple_Pack(2, Py_None, Py_None);
@@ -3471,15 +3473,16 @@ dictiter_iternextkey(dictiterobject *di)
     i = di->di_pos;
     k = d->ma_keys;
     assert(i >= 0);
-    if (d->ma_values) {
+    if (d->ma_values) {  // 分离 table 下个元素就是  entries 的第 i 个元素，由此可见是顺序取出
         if (i >= d->ma_used)
             goto fail;
         key = DK_ENTRIES(k)[i].me_key;
         assert(d->ma_values[i] != NULL);
     }
-    else {
+    else {  // 联合 table，
         Py_ssize_t n = k->dk_nentries;
         PyDictKeyEntry *entry_ptr = &DK_ENTRIES(k)[i];
+        // 直到下一个 value 有值得时候，便是下一个元素值
         while (i < n && entry_ptr->me_value == NULL) {
             entry_ptr++;
             i++;
@@ -3488,8 +3491,8 @@ dictiter_iternextkey(dictiterobject *di)
             goto fail;
         key = entry_ptr->me_key;
     }
-    di->di_pos = i+1;
-    di->len--;
+    di->di_pos = i+1;  // 下一个元素位置 +1
+    di->len--;  // 当前可遍历长度 -1
     Py_INCREF(key);
     return key;
 
@@ -3533,6 +3536,7 @@ PyTypeObject PyDictIterKey_Type = {
 };
 
 // 字典value遍历
+// 下一个 value
 static PyObject *
 dictiter_iternextvalue(dictiterobject *di)
 {
@@ -3554,6 +3558,7 @@ dictiter_iternextvalue(dictiterobject *di)
     i = di->di_pos;
     assert(i >= 0);
     if (d->ma_values) {
+        // 分离 table 取 values 中的第 di_pos 位置的元素
         if (i >= d->ma_used)
             goto fail;
         value = d->ma_values[i];
@@ -3633,6 +3638,7 @@ dictiter_iternextitem(dictiterobject *di)
         return NULL;
     }
 
+    // 分别先取出 di_pos 位置的 key 和 value 值，
     i = di->di_pos;
     assert(i >= 0);
     if (d->ma_values) {
@@ -3659,9 +3665,12 @@ dictiter_iternextitem(dictiterobject *di)
     Py_INCREF(key);
     Py_INCREF(value);
     result = di->di_result;
+
+    // 将取出来的 key、value 放在 result 对象中，这里的 result 对象是一个元祖
     if (Py_REFCNT(result) == 1) {
         PyObject *oldkey = PyTuple_GET_ITEM(result, 0);
         PyObject *oldvalue = PyTuple_GET_ITEM(result, 1);
+        // 这里的 result 对象是一个元祖，第一个元素放 key，第二个元素放 value
         PyTuple_SET_ITEM(result, 0, key);  /* steals reference */
         PyTuple_SET_ITEM(result, 1, value);  /* steals reference */
         Py_INCREF(result);
