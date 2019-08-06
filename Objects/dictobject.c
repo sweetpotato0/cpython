@@ -3236,6 +3236,7 @@ dict_init(PyObject *self, PyObject *args, PyObject *kwds)
 static PyObject *
 dict_iter(PyDictObject *dict)
 {
+    // 获取 PyDictIterKey_Type 类型的迭代对象
     return dictiter_new(dict, &PyDictIterKey_Type);
 }
 
@@ -3378,6 +3379,7 @@ typedef struct {
     Py_ssize_t len;
 } dictiterobject;
 
+// 获取迭代对象
 static PyObject *
 dictiter_new(PyDictObject *dict, PyTypeObject *itertype)
 {
@@ -3446,6 +3448,7 @@ static PyMethodDef dictiter_methods[] = {
     {NULL,              NULL}           /* sentinel */
 };
 
+// 字典keys遍历
 static PyObject*
 dictiter_iternextkey(dictiterobject *di)
 {
@@ -3529,6 +3532,7 @@ PyTypeObject PyDictIterKey_Type = {
     0,
 };
 
+// 字典value遍历
 static PyObject *
 dictiter_iternextvalue(dictiterobject *di)
 {
@@ -3610,6 +3614,7 @@ PyTypeObject PyDictIterValue_Type = {
     0,
 };
 
+// 字典的遍历
 static PyObject *
 dictiter_iternextitem(dictiterobject *di)
 {

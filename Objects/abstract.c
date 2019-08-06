@@ -2512,6 +2512,7 @@ _PyObject_RealIsSubclass(PyObject *derived, PyObject *cls)
 }
 
 
+// 获取迭代对象
 PyObject *
 PyObject_GetIter(PyObject *o)
 {

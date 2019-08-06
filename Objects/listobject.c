@@ -150,6 +150,7 @@ PyList_New(Py_ssize_t size)
         PyErr_BadInternalCall();
         return NULL;
     }
+    // 从缓存池中获取数据，没有的话重新创建
     if (numfree) {
         numfree--;
         op = free_list[numfree];
@@ -314,6 +315,7 @@ list_dealloc(PyListObject *op)
     Py_ssize_t i;
     PyObject_GC_UnTrack(op);
     Py_TRASHCAN_SAFE_BEGIN(op)
+    // 存在数据的话，释放数据所在内存
     if (op->ob_item != NULL) {
         /* Do it backwards, for Christian Tismer.
            There's a simple test case where somehow this reduces
@@ -325,9 +327,11 @@ list_dealloc(PyListObject *op)
         }
         PyMem_FREE(op->ob_item);
     }
+    // 池子有空间，类型是 list 类型，则放入缓存池
     if (numfree < PyList_MAXFREELIST && PyList_CheckExact(op))
         free_list[numfree++] = op;
     else
+        // 释放
         Py_TYPE(op)->tp_free((PyObject *)op);
     Py_TRASHCAN_SAFE_END(op)
 }
