@@ -59,11 +59,12 @@ def literal_eval(node_or_string):
         node_or_string = parse(node_or_string, mode='eval')
     if isinstance(node_or_string, Expression):
         node_or_string = node_or_string.body
+    def _raise_malformed_node(node):
+        raise ValueError(f'malformed node or string: {node!r}')
     def _convert_num(node):
-        if isinstance(node, Constant):
-            if type(node.value) in (int, float, complex):
-                return node.value
-        raise ValueError('malformed node or string: ' + repr(node))
+        if not isinstance(node, Constant) or type(node.value) not in (int, float, complex):
+            _raise_malformed_node(node)
+        return node.value
     def _convert_signed_num(node):
         if isinstance(node, UnaryOp) and isinstance(node.op, (UAdd, USub)):
             operand = _convert_num(node.operand)
@@ -82,6 +83,8 @@ def literal_eval(node_or_string):
         elif isinstance(node, Set):
             return set(map(_convert, node.elts))
         elif isinstance(node, Dict):
+            if len(node.keys) != len(node.values):
+                _raise_malformed_node(node)
             return dict(zip(map(_convert, node.keys),
                             map(_convert, node.values)))
         elif isinstance(node, BinOp) and isinstance(node.op, (Add, Sub)):
@@ -98,26 +101,35 @@ def literal_eval(node_or_string):
 
 def dump(node, annotate_fields=True, include_attributes=False):
     """
-    Return a formatted dump of the tree in *node*.  This is mainly useful for
-    debugging purposes.  The returned string will show the names and the values
-    for fields.  This makes the code impossible to evaluate, so if evaluation is
-    wanted *annotate_fields* must be set to False.  Attributes such as line
+    Return a formatted dump of the tree in node.  This is mainly useful for
+    debugging purposes.  If annotate_fields is true (by default),
+    the returned string will show the names and the values for fields.
+    If annotate_fields is false, the result string will be more compact by
+    omitting unambiguous field names.  Attributes such as line
     numbers and column offsets are not dumped by default.  If this is wanted,
-    *include_attributes* can be set to True.
+    include_attributes can be set to true.
     """
     def _format(node):
         if isinstance(node, AST):
-            fields = [(a, _format(b)) for a, b in iter_fields(node)]
-            rv = '%s(%s' % (node.__class__.__name__, ', '.join(
-                ('%s=%s' % field for field in fields)
-                if annotate_fields else
-                (b for a, b in fields)
-            ))
+            args = []
+            keywords = annotate_fields
+            for field in node._fields:
+                try:
+                    value = getattr(node, field)
+                except AttributeError:
+                    keywords = True
+                else:
+                    if keywords:
+                        args.append('%s=%s' % (field, _format(value)))
+                    else:
+                        args.append(_format(value))
             if include_attributes and node._attributes:
-                rv += fields and ', ' or ' '
-                rv += ', '.join('%s=%s' % (a, _format(getattr(node, a)))
-                                for a in node._attributes)
-            return rv + ')'
+                for a in node._attributes:
+                    try:
+                        args.append('%s=%s' % (a, _format(getattr(node, a))))
+                    except AttributeError:
+                        pass
+            return '%s(%s)' % (node.__class__.__name__, ', '.join(args))
         elif isinstance(node, list):
             return '[%s]' % ', '.join(_format(x) for x in node)
         return repr(node)
@@ -360,6 +372,27 @@ class NodeVisitor(object):
             elif isinstance(value, AST):
                 self.visit(value)
 
+    def visit_Constant(self, node):
+        value = node.value
+        type_name = _const_node_type_names.get(type(value))
+        if type_name is None:
+            for cls, name in _const_node_type_names.items():
+                if isinstance(value, cls):
+                    type_name = name
+                    break
+        if type_name is not None:
+            method = 'visit_' + type_name
+            try:
+                visitor = getattr(self, method)
+            except AttributeError:
+                pass
+            else:
+                import warnings
+                warnings.warn(f"{method} is deprecated; add visit_Constant",
+                              PendingDeprecationWarning, 2)
+                return visitor(node)
+        return self.generic_visit(node)
+
 
 class NodeTransformer(NodeVisitor):
     """
@@ -378,11 +411,11 @@ class NodeTransformer(NodeVisitor):
        class RewriteName(NodeTransformer):
 
            def visit_Name(self, node):
-               return copy_location(Subscript(
+               return Subscript(
                    value=Name(id='data', ctx=Load()),
                    slice=Index(value=Str(s=node.id)),
                    ctx=node.ctx
-               ), node)
+               )
 
     Keep in mind that if the node you're operating on has child nodes you must
     either transform the child nodes yourself or call the :meth:`generic_visit`
@@ -450,6 +483,13 @@ class _ABC(type):
         return type.__instancecheck__(cls, inst)
 
 def _new(cls, *args, **kwargs):
+    for key in kwargs:
+        if key not in cls._fields:
+            # arbitrary keyword arguments are accepted
+            continue
+        pos = cls._fields.index(key)
+        if pos < len(args):
+            raise TypeError(f"{cls.__name__} got multiple values for argument {key!r}")
     if cls in _const_types:
         return Constant(*args, **kwargs)
     return Constant.__new__(cls, *args, **kwargs)
@@ -486,4 +526,14 @@ _const_types = {
 }
 _const_types_not = {
     Num: (bool,),
+}
+_const_node_type_names = {
+    bool: 'NameConstant',  # should be before int
+    type(None): 'NameConstant',
+    int: 'Num',
+    float: 'Num',
+    complex: 'Num',
+    str: 'Str',
+    bytes: 'Bytes',
+    type(...): 'Ellipsis',
 }

@@ -187,12 +187,18 @@ itimer_retval(struct itimerval *iv)
 #endif
 
 static int
-is_main(_PyRuntimeState *runtime)
+is_main_interp(_PyRuntimeState *runtime, PyInterpreterState *interp)
 {
     unsigned long thread = PyThread_get_thread_ident();
-    PyInterpreterState *interp = _PyRuntimeState_GetThreadState(runtime)->interp;
     return (thread == runtime->main_thread
             && interp == runtime->interpreters.main);
+}
+
+static int
+is_main(_PyRuntimeState *runtime)
+{
+    PyInterpreterState *interp = _PyRuntimeState_GetThreadState(runtime)->interp;
+    return is_main_interp(runtime, interp);
 }
 
 static PyObject *
@@ -1233,6 +1239,10 @@ signal_pthread_kill_impl(PyObject *module, unsigned long thread_id,
 {
     int err;
 
+    if (PySys_Audit("signal.pthread_kill", "ki", thread_id, signalnum) < 0) {
+        return NULL;
+    }
+
     err = pthread_kill((pthread_t)thread_id, signalnum);
     if (err != 0) {
         errno = err;
@@ -1329,7 +1339,7 @@ static struct PyModuleDef signalmodule = {
 PyMODINIT_FUNC
 PyInit__signal(void)
 {
-    PyObject *m, *d, *x;
+    PyObject *m, *d;
     int i;
 
     /* Create the module and add the functions */
@@ -1350,13 +1360,17 @@ PyInit__signal(void)
     /* Add some symbolic constants to the module */
     d = PyModule_GetDict(m);
 
-    x = DefaultHandler = PyLong_FromVoidPtr((void *)SIG_DFL);
-    if (PyModule_AddObject(m, "SIG_DFL", x))
+    DefaultHandler = PyLong_FromVoidPtr((void *)SIG_DFL);
+    if (!DefaultHandler ||
+        PyDict_SetItemString(d, "SIG_DFL", DefaultHandler) < 0) {
         goto finally;
+    }
 
-    x = IgnoreHandler = PyLong_FromVoidPtr((void *)SIG_IGN);
-    if (PyModule_AddObject(m, "SIG_IGN", x))
+    IgnoreHandler = PyLong_FromVoidPtr((void *)SIG_IGN);
+    if (!IgnoreHandler ||
+        PyDict_SetItemString(d, "SIG_IGN", IgnoreHandler) < 0) {
         goto finally;
+    }
 
     if (PyModule_AddIntMacro(m, NSIG))
         goto finally;
@@ -1374,8 +1388,8 @@ PyInit__signal(void)
          goto finally;
 #endif
 
-    x = IntHandler = PyDict_GetItemString(d, "default_int_handler");
-    if (!x)
+    IntHandler = PyDict_GetItemString(d, "default_int_handler");
+    if (!IntHandler)
         goto finally;
     Py_INCREF(IntHandler);
 
@@ -1568,8 +1582,10 @@ PyInit__signal(void)
 #if defined (HAVE_SETITIMER) || defined (HAVE_GETITIMER)
     ItimerError = PyErr_NewException("signal.ItimerError",
             PyExc_OSError, NULL);
-    if (PyModule_AddObject(m, "ItimerError", ItimerError))
+    if (!ItimerError ||
+        PyDict_SetItemString(d, "ItimerError", ItimerError) < 0) {
         goto finally;
+    }
 #endif
 
 #ifdef CTRL_C_EVENT
@@ -1615,6 +1631,9 @@ finisignal(void)
     Py_CLEAR(IntHandler);
     Py_CLEAR(DefaultHandler);
     Py_CLEAR(IgnoreHandler);
+#ifdef HAVE_GETITIMER
+    Py_CLEAR(ItimerError);
+#endif
 }
 
 
@@ -1713,12 +1732,14 @@ PyOS_FiniInterrupts(void)
     finisignal();
 }
 
+
+// The caller doesn't have to hold the GIL
 int
-PyOS_InterruptOccurred(void)
+_PyOS_InterruptOccurred(PyThreadState *tstate)
 {
     if (_Py_atomic_load_relaxed(&Handlers[SIGINT].tripped)) {
         _PyRuntimeState *runtime = &_PyRuntime;
-        if (!is_main(runtime)) {
+        if (!is_main_interp(runtime, tstate->interp)) {
             return 0;
         }
         _Py_atomic_store_relaxed(&Handlers[SIGINT].tripped, 0);
@@ -1726,6 +1747,16 @@ PyOS_InterruptOccurred(void)
     }
     return 0;
 }
+
+
+// The caller must to hold the GIL
+int
+PyOS_InterruptOccurred(void)
+{
+    PyThreadState *tstate = _PyThreadState_GET();
+    return _PyOS_InterruptOccurred(tstate);
+}
+
 
 static void
 _clear_pending_signals(void)

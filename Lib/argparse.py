@@ -1,4 +1,5 @@
 # Author: Steven J. Bethard <steven.bethard@gmail.com>.
+# New maintainer as of 29 August 2019:  Raymond Hettinger <raymond.hettinger@gmail.com>
 
 """Command-line parsing library
 
@@ -404,13 +405,19 @@ class HelpFormatter(object):
                             inserts[start] += ' ['
                         else:
                             inserts[start] = '['
-                        inserts[end] = ']'
+                        if end in inserts:
+                            inserts[end] += ']'
+                        else:
+                            inserts[end] = ']'
                     else:
                         if start in inserts:
                             inserts[start] += ' ('
                         else:
                             inserts[start] = '('
-                        inserts[end] = ')'
+                        if end in inserts:
+                            inserts[end] += ')'
+                        else:
+                            inserts[end] = ')'
                     for i in range(start + 1, end):
                         inserts[i] = '|'
 
@@ -593,7 +600,10 @@ class HelpFormatter(object):
         elif action.nargs == SUPPRESS:
             result = ''
         else:
-            formats = ['%s' for _ in range(action.nargs)]
+            try:
+                formats = ['%s' for _ in range(action.nargs)]
+            except TypeError:
+                raise ValueError("invalid nargs value") from None
             result = ' '.join(formats) % get_metavar(action.nargs)
         return result
 
@@ -850,7 +860,7 @@ class _StoreAction(Action):
                  help=None,
                  metavar=None):
         if nargs == 0:
-            raise ValueError('nargs for store actions must be > 0; if you '
+            raise ValueError('nargs for store actions must be != 0; if you '
                              'have nothing to store, actions such as store '
                              'true or store const may be more appropriate')
         if const is not None and nargs != OPTIONAL:
@@ -942,7 +952,7 @@ class _AppendAction(Action):
                  help=None,
                  metavar=None):
         if nargs == 0:
-            raise ValueError('nargs for append actions must be > 0; if arg '
+            raise ValueError('nargs for append actions must be != 0; if arg '
                              'strings are not supplying the value to append, '
                              'the append const action may be more appropriate')
         if const is not None and nargs != OPTIONAL:
@@ -1204,8 +1214,9 @@ class FileType(object):
             return open(string, self._mode, self._bufsize, self._encoding,
                         self._errors)
         except OSError as e:
-            message = _("can't open '%s': %s")
-            raise ArgumentTypeError(message % (string, e))
+            args = {'filename': string, 'error': e}
+            message = _("can't open '%(filename)s': %(error)s")
+            raise ArgumentTypeError(message % args)
 
     def __repr__(self):
         args = self._mode, self._bufsize
@@ -2082,10 +2093,11 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 OPTIONAL: _('expected at most one argument'),
                 ONE_OR_MORE: _('expected at least one argument'),
             }
-            default = ngettext('expected %s argument',
+            msg = nargs_errors.get(action.nargs)
+            if msg is None:
+                msg = ngettext('expected %s argument',
                                'expected %s arguments',
                                action.nargs) % action.nargs
-            msg = nargs_errors.get(action.nargs, default)
             raise ArgumentError(action, msg)
 
         # return the number of arguments matched
@@ -2132,24 +2144,23 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
                 action = self._option_string_actions[option_string]
                 return action, option_string, explicit_arg
 
-        if self.allow_abbrev:
-            # search through all possible prefixes of the option string
-            # and all actions in the parser for possible interpretations
-            option_tuples = self._get_option_tuples(arg_string)
+        # search through all possible prefixes of the option string
+        # and all actions in the parser for possible interpretations
+        option_tuples = self._get_option_tuples(arg_string)
 
-            # if multiple actions match, the option string was ambiguous
-            if len(option_tuples) > 1:
-                options = ', '.join([option_string
-                    for action, option_string, explicit_arg in option_tuples])
-                args = {'option': arg_string, 'matches': options}
-                msg = _('ambiguous option: %(option)s could match %(matches)s')
-                self.error(msg % args)
+        # if multiple actions match, the option string was ambiguous
+        if len(option_tuples) > 1:
+            options = ', '.join([option_string
+                for action, option_string, explicit_arg in option_tuples])
+            args = {'option': arg_string, 'matches': options}
+            msg = _('ambiguous option: %(option)s could match %(matches)s')
+            self.error(msg % args)
 
-            # if exactly one action matched, this segmentation is good,
-            # so return the parsed action
-            elif len(option_tuples) == 1:
-                option_tuple, = option_tuples
-                return option_tuple
+        # if exactly one action matched, this segmentation is good,
+        # so return the parsed action
+        elif len(option_tuples) == 1:
+            option_tuple, = option_tuples
+            return option_tuple
 
         # if it was not found as an option, but it looks like a negative
         # number, it was meant to be positional
@@ -2173,16 +2184,17 @@ class ArgumentParser(_AttributeHolder, _ActionsContainer):
         # split at the '='
         chars = self.prefix_chars
         if option_string[0] in chars and option_string[1] in chars:
-            if '=' in option_string:
-                option_prefix, explicit_arg = option_string.split('=', 1)
-            else:
-                option_prefix = option_string
-                explicit_arg = None
-            for option_string in self._option_string_actions:
-                if option_string.startswith(option_prefix):
-                    action = self._option_string_actions[option_string]
-                    tup = action, option_string, explicit_arg
-                    result.append(tup)
+            if self.allow_abbrev:
+                if '=' in option_string:
+                    option_prefix, explicit_arg = option_string.split('=', 1)
+                else:
+                    option_prefix = option_string
+                    explicit_arg = None
+                for option_string in self._option_string_actions:
+                    if option_string.startswith(option_prefix):
+                        action = self._option_string_actions[option_string]
+                        tup = action, option_string, explicit_arg
+                        result.append(tup)
 
         # single character options can be concatenated with their arguments
         # but multiple character options always have to have their argument

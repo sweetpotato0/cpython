@@ -176,7 +176,7 @@ PyVectorcall_Call(PyObject *callable, PyObject *tuple, PyObject *kwargs)
     /* get vectorcallfunc as in _PyVectorcall_Function, but without
      * the _Py_TPFLAGS_HAVE_VECTORCALL check */
     Py_ssize_t offset = Py_TYPE(callable)->tp_vectorcall_offset;
-    if ((offset <= 0) || (!Py_TYPE(callable)->tp_call)) {
+    if (offset <= 0) {
         PyErr_Format(PyExc_TypeError, "'%.200s' object does not support vectorcall",
                      Py_TYPE(callable)->tp_name);
         return NULL;
@@ -206,7 +206,7 @@ PyVectorcall_Call(PyObject *callable, PyObject *tuple, PyObject *kwargs)
         Py_DECREF(kwnames);
     }
 
-    return result;
+    return _Py_CheckFunctionResult(callable, result, NULL);
 }
 
 
@@ -719,25 +719,6 @@ no_keyword_error:
 
 exit:
     Py_LeaveRecursiveCall();
-    return result;
-}
-
-
-PyObject *
-_PyCFunction_Vectorcall(PyObject *func,
-                        PyObject *const *args, size_t nargsf,
-                        PyObject *kwnames)
-{
-    PyObject *result;
-
-    assert(func != NULL);
-    assert(PyCFunction_Check(func));
-    Py_ssize_t nargs = PyVectorcall_NARGS(nargsf);
-
-    result = _PyMethodDef_RawFastCallKeywords(((PyCFunctionObject*)func)->m_ml,
-                                              PyCFunction_GET_SELF(func),
-                                              args, nargs, kwnames);
-    result = _Py_CheckFunctionResult(func, result, NULL);
     return result;
 }
 

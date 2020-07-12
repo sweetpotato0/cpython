@@ -3,7 +3,7 @@ import test.support
 # Skip tests if _multiprocessing wasn't built.
 test.support.import_module('_multiprocessing')
 # Skip tests if sem_open implementation is broken.
-test.support.import_module('multiprocessing.synchronize')
+test.support.skip_if_broken_multiprocessing_synchronize()
 
 from test.support.script_helper import assert_python_ok
 
@@ -26,6 +26,9 @@ from concurrent.futures._base import (
     BrokenExecutor)
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context
+
+import multiprocessing.process
+import multiprocessing.util
 
 
 def create_future(state=PENDING, exception=None, result=None):
@@ -84,8 +87,7 @@ class MyObject(object):
 
 
 class EventfulGCObj():
-    def __init__(self, ctx):
-        mgr = get_context(ctx).Manager()
+    def __init__(self, mgr):
         self.event = mgr.Event()
 
     def __del__(self):
@@ -845,11 +847,20 @@ class ProcessPoolExecutorTest(ExecutorTest):
     def test_ressources_gced_in_workers(self):
         # Ensure that argument for a job are correctly gc-ed after the job
         # is finished
-        obj = EventfulGCObj(self.ctx)
+        mgr = get_context(self.ctx).Manager()
+        obj = EventfulGCObj(mgr)
         future = self.executor.submit(id, obj)
         future.result()
 
         self.assertTrue(obj.event.wait(timeout=1))
+
+        # explicitly destroy the object to ensure that EventfulGCObj.__del__()
+        # is called while manager is still running.
+        obj = None
+        test.support.gc_collect()
+
+        mgr.shutdown()
+        mgr.join()
 
 
 create_executor_tests(ProcessPoolExecutorTest,
@@ -1294,12 +1305,17 @@ class FutureTests(BaseTestCase):
         self.assertEqual(f.exception(), e)
 
 
-@test.support.reap_threads
-def test_main():
-    try:
-        test.support.run_unittest(__name__)
-    finally:
-        test.support.reap_children()
+_threads_key = None
+
+def setUpModule():
+    global _threads_key
+    _threads_key = test.support.threading_setup()
+
+
+def tearDownModule():
+    test.support.threading_cleanup(*_threads_key)
+    multiprocessing.util._cleanup_tests()
+
 
 if __name__ == "__main__":
-    test_main()
+    unittest.main()

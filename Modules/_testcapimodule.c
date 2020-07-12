@@ -32,6 +32,8 @@
 #  error "_testcapi must test the public Python C API, not CPython internal C API"
 #endif
 
+static struct PyModuleDef _testcapimodule;
+
 static PyObject *TestError;     /* set to exception object in init */
 
 /* Raise TestError with test_name + ": " + msg, and return NULL. */
@@ -3343,6 +3345,8 @@ run_in_subinterp(PyObject *self, PyObject *args)
     const char *code;
     int r;
     PyThreadState *substate, *mainstate;
+    /* only initialise 'cflags.cf_flags' to test backwards compatibility */
+    PyCompilerFlags cflags = {0};
 
     if (!PyArg_ParseTuple(args, "s:run_in_subinterp",
                           &code))
@@ -3361,7 +3365,7 @@ run_in_subinterp(PyObject *self, PyObject *args)
         PyErr_SetString(PyExc_RuntimeError, "sub-interpreter creation failed");
         return NULL;
     }
-    r = PyRun_SimpleString(code);
+    r = PyRun_SimpleStringFlags(code, &cflags);
     Py_EndInterpreter(substate);
 
     PyThreadState_Swap(mainstate);
@@ -4499,6 +4503,14 @@ test_pyobject_is_freed(const char *test_name, PyObject *op)
 
 
 static PyObject*
+check_pyobject_null_is_freed(PyObject *self, PyObject *Py_UNUSED(args))
+{
+    PyObject *op = NULL;
+    return test_pyobject_is_freed("check_pyobject_null_is_freed", op);
+}
+
+
+static PyObject*
 check_pyobject_uninitialized_is_freed(PyObject *self, PyObject *Py_UNUSED(args))
 {
     PyObject *op = (PyObject *)PyObject_Malloc(sizeof(PyObject));
@@ -4523,7 +4535,7 @@ check_pyobject_forbidden_bytes_is_freed(PyObject *self, PyObject *Py_UNUSED(args
     /* Initialize reference count to avoid early crash in ceval or GC */
     Py_REFCNT(op) = 1;
     /* ob_type field is after the memory block: part of "forbidden bytes"
-       when using debug hooks on memory allocatrs! */
+       when using debug hooks on memory allocators! */
     return test_pyobject_is_freed("check_pyobject_forbidden_bytes_is_freed", op);
 }
 
@@ -5053,6 +5065,21 @@ test_write_unraisable_exc(PyObject *self, PyObject *args)
 }
 
 
+static PyObject*
+pynumber_tobase(PyObject *module, PyObject *args)
+{
+    PyObject *obj;
+    int base;
+    if (!PyArg_ParseTuple(args, "Oi:pynumber_tobase",
+                          &obj, &base)) {
+        return NULL;
+    }
+    return PyNumber_ToBase(obj, base);
+}
+
+
+static PyObject *test_buildvalue_issue38913(PyObject *, PyObject *);
+
 static PyMethodDef TestMethods[] = {
     {"raise_exception",         raise_exception,                 METH_VARARGS},
     {"raise_memoryerror",       raise_memoryerror,               METH_NOARGS},
@@ -5112,6 +5139,7 @@ static PyMethodDef TestMethods[] = {
 #endif
     {"getbuffer_with_null_view", getbuffer_with_null_view, METH_O},
     {"test_buildvalue_N",       test_buildvalue_N,               METH_NOARGS},
+    {"test_buildvalue_issue38913", test_buildvalue_issue38913,   METH_NOARGS},
     {"get_args", get_args, METH_VARARGS},
     {"get_kwargs", (PyCFunction)(void(*)(void))get_kwargs, METH_VARARGS|METH_KEYWORDS},
     {"getargs_tuple",           getargs_tuple,                   METH_VARARGS},
@@ -5266,6 +5294,7 @@ static PyMethodDef TestMethods[] = {
     {"pymem_api_misuse", pymem_api_misuse, METH_NOARGS},
     {"pymem_malloc_without_gil", pymem_malloc_without_gil, METH_NOARGS},
     {"pymem_getallocatorsname", test_pymem_getallocatorsname, METH_NOARGS},
+    {"check_pyobject_null_is_freed", check_pyobject_null_is_freed, METH_NOARGS},
     {"check_pyobject_uninitialized_is_freed", check_pyobject_uninitialized_is_freed, METH_NOARGS},
     {"check_pyobject_forbidden_bytes_is_freed", check_pyobject_forbidden_bytes_is_freed, METH_NOARGS},
     {"check_pyobject_freed_is_freed", check_pyobject_freed_is_freed, METH_NOARGS},
@@ -5295,6 +5324,7 @@ static PyMethodDef TestMethods[] = {
     {"negative_refcount", negative_refcount, METH_NOARGS},
 #endif
     {"write_unraisable_exc", test_write_unraisable_exc, METH_VARARGS},
+    {"pynumber_tobase", pynumber_tobase, METH_VARARGS},
     {NULL, NULL} /* sentinel */
 };
 
@@ -5955,6 +5985,271 @@ static PyTypeObject MethodDescriptor2_Type = {
     .tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | _Py_TPFLAGS_HAVE_VECTORCALL,
 };
 
+PyDoc_STRVAR(heapgctype__doc__,
+"A heap type with GC, and with overridden dealloc.\n\n"
+"The 'value' attribute is set to 10 in __init__.");
+
+typedef struct {
+    PyObject_HEAD
+    int value;
+} HeapCTypeObject;
+
+static struct PyMemberDef heapctype_members[] = {
+    {"value", T_INT, offsetof(HeapCTypeObject, value)},
+    {NULL} /* Sentinel */
+};
+
+static int
+heapctype_init(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    ((HeapCTypeObject *)self)->value = 10;
+    return 0;
+}
+
+static void
+heapgcctype_dealloc(HeapCTypeObject *self)
+{
+    PyTypeObject *tp = Py_TYPE(self);
+    PyObject_GC_UnTrack(self);
+    PyObject_GC_Del(self);
+    Py_DECREF(tp);
+}
+
+static PyType_Slot HeapGcCType_slots[] = {
+    {Py_tp_init, heapctype_init},
+    {Py_tp_members, heapctype_members},
+    {Py_tp_dealloc, heapgcctype_dealloc},
+    {Py_tp_doc, (char*)heapgctype__doc__},
+    {0, 0},
+};
+
+static PyType_Spec HeapGcCType_spec = {
+    "_testcapi.HeapGcCType",
+    sizeof(HeapCTypeObject),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE | Py_TPFLAGS_HAVE_GC,
+    HeapGcCType_slots
+};
+
+PyDoc_STRVAR(heapctype__doc__,
+"A heap type without GC, but with overridden dealloc.\n\n"
+"The 'value' attribute is set to 10 in __init__.");
+
+static void
+heapctype_dealloc(HeapCTypeObject *self)
+{
+    PyTypeObject *tp = Py_TYPE(self);
+    PyObject_Del(self);
+    Py_DECREF(tp);
+}
+
+static PyType_Slot HeapCType_slots[] = {
+    {Py_tp_init, heapctype_init},
+    {Py_tp_members, heapctype_members},
+    {Py_tp_dealloc, heapctype_dealloc},
+    {Py_tp_doc, (char*)heapctype__doc__},
+    {0, 0},
+};
+
+static PyType_Spec HeapCType_spec = {
+    "_testcapi.HeapCType",
+    sizeof(HeapCTypeObject),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    HeapCType_slots
+};
+
+PyDoc_STRVAR(heapctypesubclass__doc__,
+"Subclass of HeapCType, without GC.\n\n"
+"__init__ sets the 'value' attribute to 10 and 'value2' to 20.");
+
+typedef struct {
+    HeapCTypeObject base;
+    int value2;
+} HeapCTypeSubclassObject;
+
+static int
+heapctypesubclass_init(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    /* Call __init__ of the superclass */
+    if (heapctype_init(self, args, kwargs) < 0) {
+        return -1;
+    }
+    /* Initialize additional element */
+    ((HeapCTypeSubclassObject *)self)->value2 = 20;
+    return 0;
+}
+
+static struct PyMemberDef heapctypesubclass_members[] = {
+    {"value2", T_INT, offsetof(HeapCTypeSubclassObject, value2)},
+    {NULL} /* Sentinel */
+};
+
+static PyType_Slot HeapCTypeSubclass_slots[] = {
+    {Py_tp_init, heapctypesubclass_init},
+    {Py_tp_members, heapctypesubclass_members},
+    {Py_tp_doc, (char*)heapctypesubclass__doc__},
+    {0, 0},
+};
+
+static PyType_Spec HeapCTypeSubclass_spec = {
+    "_testcapi.HeapCTypeSubclass",
+    sizeof(HeapCTypeSubclassObject),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    HeapCTypeSubclass_slots
+};
+
+PyDoc_STRVAR(heapctypesubclasswithfinalizer__doc__,
+"Subclass of HeapCType with a finalizer that reassigns __class__.\n\n"
+"__class__ is set to plain HeapCTypeSubclass during finalization.\n"
+"__init__ sets the 'value' attribute to 10 and 'value2' to 20.");
+
+static int
+heapctypesubclasswithfinalizer_init(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    PyTypeObject *base = (PyTypeObject *)PyType_GetSlot(Py_TYPE(self), Py_tp_base);
+    initproc base_init = PyType_GetSlot(base, Py_tp_init);
+    base_init(self, args, kwargs);
+    return 0;
+}
+
+static void
+heapctypesubclasswithfinalizer_finalize(PyObject *self)
+{
+    PyObject *error_type, *error_value, *error_traceback, *m;
+    PyObject *oldtype = NULL, *newtype = NULL, *refcnt = NULL;
+
+    /* Save the current exception, if any. */
+    PyErr_Fetch(&error_type, &error_value, &error_traceback);
+
+    m = PyState_FindModule(&_testcapimodule);
+    if (m == NULL) {
+        goto cleanup_finalize;
+    }
+    oldtype = PyObject_GetAttrString(m, "HeapCTypeSubclassWithFinalizer");
+    newtype = PyObject_GetAttrString(m, "HeapCTypeSubclass");
+    if (oldtype == NULL || newtype == NULL) {
+        goto cleanup_finalize;
+    }
+
+    if (PyObject_SetAttrString(self, "__class__", newtype) < 0) {
+        goto cleanup_finalize;
+    }
+    refcnt = PyLong_FromSsize_t(Py_REFCNT(oldtype));
+    if (refcnt == NULL) {
+        goto cleanup_finalize;
+    }
+    if (PyObject_SetAttrString(oldtype, "refcnt_in_del", refcnt) < 0) {
+        goto cleanup_finalize;
+    }
+    Py_DECREF(refcnt);
+    refcnt = PyLong_FromSsize_t(Py_REFCNT(newtype));
+    if (refcnt == NULL) {
+        goto cleanup_finalize;
+    }
+    if (PyObject_SetAttrString(newtype, "refcnt_in_del", refcnt) < 0) {
+        goto cleanup_finalize;
+    }
+
+cleanup_finalize:
+    Py_XDECREF(oldtype);
+    Py_XDECREF(newtype);
+    Py_XDECREF(refcnt);
+
+    /* Restore the saved exception. */
+    PyErr_Restore(error_type, error_value, error_traceback);
+}
+
+static PyType_Slot HeapCTypeSubclassWithFinalizer_slots[] = {
+    {Py_tp_init, heapctypesubclasswithfinalizer_init},
+    {Py_tp_members, heapctypesubclass_members},
+    {Py_tp_finalize, heapctypesubclasswithfinalizer_finalize},
+    {Py_tp_doc, (char*)heapctypesubclasswithfinalizer__doc__},
+    {0, 0},
+};
+
+static PyType_Spec HeapCTypeSubclassWithFinalizer_spec = {
+    "_testcapi.HeapCTypeSubclassWithFinalizer",
+    sizeof(HeapCTypeSubclassObject),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_FINALIZE,
+    HeapCTypeSubclassWithFinalizer_slots
+};
+
+PyDoc_STRVAR(heapctypesetattr__doc__,
+"A heap type without GC, but with overridden __setattr__.\n\n"
+"The 'value' attribute is set to 10 in __init__ and updated via attribute setting.");
+
+typedef struct {
+    PyObject_HEAD
+    long value;
+} HeapCTypeSetattrObject;
+
+static struct PyMemberDef heapctypesetattr_members[] = {
+    {"pvalue", T_LONG, offsetof(HeapCTypeSetattrObject, value)},
+    {NULL} /* Sentinel */
+};
+
+static int
+heapctypesetattr_init(PyObject *self, PyObject *args, PyObject *kwargs)
+{
+    ((HeapCTypeSetattrObject *)self)->value = 10;
+    return 0;
+}
+
+static void
+heapctypesetattr_dealloc(HeapCTypeSetattrObject *self)
+{
+    PyTypeObject *tp = Py_TYPE(self);
+    PyObject_Del(self);
+    Py_DECREF(tp);
+}
+
+static int
+heapctypesetattr_setattro(HeapCTypeSetattrObject *self, PyObject *attr, PyObject *value)
+{
+    PyObject *svalue = PyUnicode_FromString("value");
+    if (svalue == NULL)
+        return -1;
+    int eq = PyObject_RichCompareBool(svalue, attr, Py_EQ);
+    Py_DECREF(svalue);
+    if (eq < 0)
+        return -1;
+    if (!eq) {
+        return PyObject_GenericSetAttr((PyObject*) self, attr, value);
+    }
+    if (value == NULL) {
+        self->value = 0;
+        return 0;
+    }
+    PyObject *ivalue = PyNumber_Long(value);
+    if (ivalue == NULL)
+        return -1;
+    long v = PyLong_AsLong(ivalue);
+    Py_DECREF(ivalue);
+    if (v == -1 && PyErr_Occurred())
+        return -1;
+    self->value = v;
+    return 0;
+}
+
+static PyType_Slot HeapCTypeSetattr_slots[] = {
+    {Py_tp_init, heapctypesetattr_init},
+    {Py_tp_members, heapctypesetattr_members},
+    {Py_tp_setattro, heapctypesetattr_setattro},
+    {Py_tp_dealloc, heapctypesetattr_dealloc},
+    {Py_tp_doc, (char*)heapctypesetattr__doc__},
+    {0, 0},
+};
+
+static PyType_Spec HeapCTypeSetattr_spec = {
+    "_testcapi.HeapCTypeSetattr",
+    sizeof(HeapCTypeSetattrObject),
+    0,
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
+    HeapCTypeSetattr_slots
+};
 
 static struct PyModuleDef _testcapimodule = {
     PyModuleDef_HEAD_INIT,
@@ -6007,6 +6302,10 @@ PyInit__testcapi(void)
         return NULL;
     Py_INCREF(&MyList_Type);
     PyModule_AddObject(m, "MyList", (PyObject *)&MyList_Type);
+
+    /* bpo-37250: old Cython code sets tp_print to 0, we check that
+     * this doesn't break anything. */
+    MyList_Type.tp_print = 0;
 
     if (PyType_Ready(&MethodDescriptorBase_Type) < 0)
         return NULL;
@@ -6076,14 +6375,97 @@ PyInit__testcapi(void)
     PyModule_AddObject(m, "instancemethod", (PyObject *)&PyInstanceMethod_Type);
 
     PyModule_AddIntConstant(m, "the_number_three", 3);
+    PyObject *v;
 #ifdef WITH_PYMALLOC
-    PyModule_AddObject(m, "WITH_PYMALLOC", Py_True);
+    v = Py_True;
 #else
-    PyModule_AddObject(m, "WITH_PYMALLOC", Py_False);
+    v = Py_False;
 #endif
+    Py_INCREF(v);
+    PyModule_AddObject(m, "WITH_PYMALLOC", v);
 
     TestError = PyErr_NewException("_testcapi.error", NULL, NULL);
     Py_INCREF(TestError);
     PyModule_AddObject(m, "error", TestError);
+
+    PyObject *HeapGcCType = PyType_FromSpec(&HeapGcCType_spec);
+    if (HeapGcCType == NULL) {
+        return NULL;
+    }
+    PyModule_AddObject(m, "HeapGcCType", HeapGcCType);
+
+    PyObject *HeapCType = PyType_FromSpec(&HeapCType_spec);
+    if (HeapCType == NULL) {
+        return NULL;
+    }
+    PyObject *subclass_bases = PyTuple_Pack(1, HeapCType);
+    if (subclass_bases == NULL) {
+        return NULL;
+    }
+    PyObject *HeapCTypeSubclass = PyType_FromSpecWithBases(&HeapCTypeSubclass_spec, subclass_bases);
+    if (HeapCTypeSubclass == NULL) {
+        return NULL;
+    }
+    Py_DECREF(subclass_bases);
+    PyModule_AddObject(m, "HeapCTypeSubclass", HeapCTypeSubclass);
+
+    PyObject *HeapCTypeSetattr = PyType_FromSpec(&HeapCTypeSetattr_spec);
+    if (HeapCTypeSetattr == NULL) {
+        return NULL;
+    }
+    PyModule_AddObject(m, "HeapCTypeSetattr", HeapCTypeSetattr);
+
+    PyObject *subclass_with_finalizer_bases = PyTuple_Pack(1, HeapCTypeSubclass);
+    if (subclass_with_finalizer_bases == NULL) {
+        return NULL;
+    }
+    PyObject *HeapCTypeSubclassWithFinalizer = PyType_FromSpecWithBases(
+        &HeapCTypeSubclassWithFinalizer_spec, subclass_with_finalizer_bases);
+    if (HeapCTypeSubclassWithFinalizer == NULL) {
+        return NULL;
+    }
+    Py_DECREF(subclass_with_finalizer_bases);
+    PyModule_AddObject(m, "HeapCTypeSubclassWithFinalizer", HeapCTypeSubclassWithFinalizer);
+
+    PyState_AddModule(m, &_testcapimodule);
     return m;
+}
+
+
+/* Test the C API exposed when PY_SSIZE_T_CLEAN is not defined */
+
+#undef Py_BuildValue
+PyAPI_FUNC(PyObject *) Py_BuildValue(const char *, ...);
+
+static PyObject *
+test_buildvalue_issue38913(PyObject *self, PyObject *Py_UNUSED(ignored))
+{
+    PyObject *res;
+    const char str[] = "string";
+    const Py_UNICODE unicode[] = L"unicode";
+    PyErr_SetNone(PyExc_ZeroDivisionError);
+
+    res = Py_BuildValue("(s#O)", str, 1, Py_None);
+    assert(res == NULL);
+    if (!PyErr_ExceptionMatches(PyExc_ZeroDivisionError)) {
+        return NULL;
+    }
+    res = Py_BuildValue("(z#O)", str, 1, Py_None);
+    assert(res == NULL);
+    if (!PyErr_ExceptionMatches(PyExc_ZeroDivisionError)) {
+        return NULL;
+    }
+    res = Py_BuildValue("(y#O)", str, 1, Py_None);
+    assert(res == NULL);
+    if (!PyErr_ExceptionMatches(PyExc_ZeroDivisionError)) {
+        return NULL;
+    }
+    res = Py_BuildValue("(u#O)", unicode, 1, Py_None);
+    assert(res == NULL);
+    if (!PyErr_ExceptionMatches(PyExc_ZeroDivisionError)) {
+        return NULL;
+    }
+
+    PyErr_Clear();
+    Py_RETURN_NONE;
 }

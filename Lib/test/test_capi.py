@@ -8,7 +8,6 @@ import random
 import re
 import subprocess
 import sys
-import sysconfig
 import textwrap
 import threading
 import time
@@ -199,6 +198,7 @@ class CAPITest(unittest.TestCase):
             self.assertRegex(err.replace(b'\r', b''),
                              br'Fatal Python error: a function returned NULL '
                                 br'without setting an error\n'
+                             br'Python runtime state: initialized\n'
                              br'SystemError: <built-in function '
                                  br'return_null_without_error> returned NULL '
                                  br'without setting an error\n'
@@ -226,6 +226,7 @@ class CAPITest(unittest.TestCase):
             self.assertRegex(err.replace(b'\r', b''),
                              br'Fatal Python error: a function returned a '
                                 br'result with an error set\n'
+                             br'Python runtime state: initialized\n'
                              br'ValueError\n'
                              br'\n'
                              br'The above exception was the direct cause '
@@ -349,9 +350,11 @@ class CAPITest(unittest.TestCase):
         for i in range(1000):
             L = MyList((L,))
 
+    @support.requires_resource('cpu')
     def test_trashcan_python_class1(self):
         self.do_test_trashcan_python_class(list)
 
+    @support.requires_resource('cpu')
     def test_trashcan_python_class2(self):
         from _testcapi import MyList
         self.do_test_trashcan_python_class(MyList)
@@ -383,6 +386,114 @@ class CAPITest(unittest.TestCase):
             self.assertGreater(PyList.num, 0)
             del L
             self.assertEqual(PyList.num, 0)
+
+    def test_subclass_of_heap_gc_ctype_with_tpdealloc_decrefs_once(self):
+        class HeapGcCTypeSubclass(_testcapi.HeapGcCType):
+            def __init__(self):
+                self.value2 = 20
+                super().__init__()
+
+        subclass_instance = HeapGcCTypeSubclass()
+        type_refcnt = sys.getrefcount(HeapGcCTypeSubclass)
+
+        # Test that subclass instance was fully created
+        self.assertEqual(subclass_instance.value, 10)
+        self.assertEqual(subclass_instance.value2, 20)
+
+        # Test that the type reference count is only decremented once
+        del subclass_instance
+        self.assertEqual(type_refcnt - 1, sys.getrefcount(HeapGcCTypeSubclass))
+
+    def test_subclass_of_heap_gc_ctype_with_del_modifying_dunder_class_only_decrefs_once(self):
+        class A(_testcapi.HeapGcCType):
+            def __init__(self):
+                self.value2 = 20
+                super().__init__()
+
+        class B(A):
+            def __init__(self):
+                super().__init__()
+
+            def __del__(self):
+                self.__class__ = A
+                A.refcnt_in_del = sys.getrefcount(A)
+                B.refcnt_in_del = sys.getrefcount(B)
+
+        subclass_instance = B()
+        type_refcnt = sys.getrefcount(B)
+        new_type_refcnt = sys.getrefcount(A)
+
+        # Test that subclass instance was fully created
+        self.assertEqual(subclass_instance.value, 10)
+        self.assertEqual(subclass_instance.value2, 20)
+
+        del subclass_instance
+
+        # Test that setting __class__ modified the reference counts of the types
+        self.assertEqual(type_refcnt - 1, B.refcnt_in_del)
+        self.assertEqual(new_type_refcnt + 1, A.refcnt_in_del)
+
+        # Test that the original type already has decreased its refcnt
+        self.assertEqual(type_refcnt - 1, sys.getrefcount(B))
+
+        # Test that subtype_dealloc decref the newly assigned __class__ only once
+        self.assertEqual(new_type_refcnt, sys.getrefcount(A))
+
+    def test_c_subclass_of_heap_ctype_with_tpdealloc_decrefs_once(self):
+        subclass_instance = _testcapi.HeapCTypeSubclass()
+        type_refcnt = sys.getrefcount(_testcapi.HeapCTypeSubclass)
+
+        # Test that subclass instance was fully created
+        self.assertEqual(subclass_instance.value, 10)
+        self.assertEqual(subclass_instance.value2, 20)
+
+        # Test that the type reference count is only decremented once
+        del subclass_instance
+        self.assertEqual(type_refcnt - 1, sys.getrefcount(_testcapi.HeapCTypeSubclass))
+
+    def test_c_subclass_of_heap_ctype_with_del_modifying_dunder_class_only_decrefs_once(self):
+        subclass_instance = _testcapi.HeapCTypeSubclassWithFinalizer()
+        type_refcnt = sys.getrefcount(_testcapi.HeapCTypeSubclassWithFinalizer)
+        new_type_refcnt = sys.getrefcount(_testcapi.HeapCTypeSubclass)
+
+        # Test that subclass instance was fully created
+        self.assertEqual(subclass_instance.value, 10)
+        self.assertEqual(subclass_instance.value2, 20)
+
+        # The tp_finalize slot will set __class__ to HeapCTypeSubclass
+        del subclass_instance
+
+        # Test that setting __class__ modified the reference counts of the types
+        self.assertEqual(type_refcnt - 1, _testcapi.HeapCTypeSubclassWithFinalizer.refcnt_in_del)
+        self.assertEqual(new_type_refcnt + 1, _testcapi.HeapCTypeSubclass.refcnt_in_del)
+
+        # Test that the original type already has decreased its refcnt
+        self.assertEqual(type_refcnt - 1, sys.getrefcount(_testcapi.HeapCTypeSubclassWithFinalizer))
+
+        # Test that subtype_dealloc decref the newly assigned __class__ only once
+        self.assertEqual(new_type_refcnt, sys.getrefcount(_testcapi.HeapCTypeSubclass))
+
+    def test_heaptype_with_setattro(self):
+        obj = _testcapi.HeapCTypeSetattr()
+        self.assertEqual(obj.pvalue, 10)
+        obj.value = 12
+        self.assertEqual(obj.pvalue, 12)
+        del obj.value
+        self.assertEqual(obj.pvalue, 0)
+
+    def test_pynumber_tobase(self):
+        from _testcapi import pynumber_tobase
+        self.assertEqual(pynumber_tobase(123, 2), '0b1111011')
+        self.assertEqual(pynumber_tobase(123, 8), '0o173')
+        self.assertEqual(pynumber_tobase(123, 10), '123')
+        self.assertEqual(pynumber_tobase(123, 16), '0x7b')
+        self.assertEqual(pynumber_tobase(-123, 2), '-0b1111011')
+        self.assertEqual(pynumber_tobase(-123, 8), '-0o173')
+        self.assertEqual(pynumber_tobase(-123, 10), '-123')
+        self.assertEqual(pynumber_tobase(-123, 16), '-0x7b')
+        self.assertRaises(TypeError, pynumber_tobase, 123.0, 10)
+        self.assertRaises(TypeError, pynumber_tobase, '123', 10)
+        self.assertRaises(SystemError, pynumber_tobase, 123, 0)
 
 
 class TestPendingCalls(unittest.TestCase):
@@ -480,6 +591,26 @@ class SubinterpreterTest(unittest.TestCase):
             self.assertEqual(ret, 0)
             self.assertNotEqual(pickle.load(f), id(sys.modules))
             self.assertNotEqual(pickle.load(f), id(builtins))
+
+    def test_subinterps_recent_language_features(self):
+        r, w = os.pipe()
+        code = """if 1:
+            import pickle
+            with open({:d}, "wb") as f:
+
+                def noop(x): return x
+
+                a = (b := f'1{{2}}3') + noop('x')  # Py 3.8 (:=) / 3.6 (f'')
+
+                async def foo(arg): return await arg  # Py 3.5
+
+                pickle.dump(dict(a=a, b=b), f)
+            """.format(w)
+
+        with open(r, "rb") as f:
+            ret = support.run_in_subinterp(code)
+            self.assertEqual(ret, 0)
+            self.assertEqual(pickle.load(f), {'a': '123x', 'b': '123'})
 
     def test_mutate_exception(self):
         """
@@ -604,6 +735,9 @@ class PyMemDebugTests(unittest.TestCase):
                 os._exit(1)
         ''')
         assert_python_ok('-c', code, PYTHONMALLOC=self.PYTHONMALLOC)
+
+    def test_pyobject_null_is_freed(self):
+        self.check_pyobject_is_freed('check_pyobject_null_is_freed')
 
     def test_pyobject_uninitialized_is_freed(self):
         self.check_pyobject_is_freed('check_pyobject_uninitialized_is_freed')

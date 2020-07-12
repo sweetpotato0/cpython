@@ -10,6 +10,7 @@ import warnings
 import collections
 import contextlib
 import traceback
+import types
 
 from . import result
 from .util import (strclass, safe_repr, _count_diff_all_purpose,
@@ -122,6 +123,10 @@ def skip(reason):
         test_item.__unittest_skip__ = True
         test_item.__unittest_skip_why__ = reason
         return test_item
+    if isinstance(reason, types.FunctionType):
+        test_item = reason
+        reason = ''
+        return decorator(test_item)
     return decorator
 
 def skipIf(condition, reason):
@@ -246,7 +251,7 @@ class _AssertWarnsContext(_AssertRaisesBaseContext):
     def __enter__(self):
         # The __warningregistry__'s need to be in a pristine state for tests
         # to work properly.
-        for v in sys.modules.values():
+        for v in list(sys.modules.values()):
             if getattr(v, '__warningregistry__', None):
                 v.__warningregistry__ = {}
         self.warnings_manager = warnings.catch_warnings(record=True)
@@ -524,7 +529,7 @@ class TestCase(object):
         the specified test method's docstring.
         """
         doc = self._testMethodDoc
-        return doc and doc.split("\n")[0].strip() or None
+        return doc.strip().split("\n")[0].strip() if doc else None
 
 
     def id(self):

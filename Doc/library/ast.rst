@@ -101,12 +101,16 @@ Node classes
       node = ast.UnaryOp(ast.USub(), ast.Constant(5, lineno=0, col_offset=0),
                          lineno=0, col_offset=0)
 
+.. versionchanged:: 3.8
+
+   Class :class:`ast.Constant` is now used for all constants.
+
 .. deprecated:: 3.8
 
-   Class :class:`ast.Constant` is now used for all constants. Old classes
-   :class:`ast.Num`, :class:`ast.Str`, :class:`ast.Bytes`,
+   Old classes :class:`ast.Num`, :class:`ast.Str`, :class:`ast.Bytes`,
    :class:`ast.NameConstant` and :class:`ast.Ellipsis` are still available,
-   but they will be removed in future Python releases.
+   but they will be removed in future Python releases.  In the meanwhile,
+   instantiating them will return an instance of a different class.
 
 
 .. _abstract-grammar:
@@ -275,6 +279,13 @@ and classes for traversing abstract syntax trees:
    during traversal.  For this a special visitor exists
    (:class:`NodeTransformer`) that allows modifications.
 
+   .. deprecated:: 3.8
+
+      Methods :meth:`visit_Num`, :meth:`visit_Str`, :meth:`visit_Bytes`,
+      :meth:`visit_NameConstant` and :meth:`visit_Ellipsis` are deprecated
+      now and will not be called in future Python versions.  Add the
+      :meth:`visit_Constant` method to handle all constant nodes.
+
 
 .. class:: NodeTransformer()
 
@@ -293,11 +304,11 @@ and classes for traversing abstract syntax trees:
       class RewriteName(NodeTransformer):
 
           def visit_Name(self, node):
-              return copy_location(Subscript(
+              return Subscript(
                   value=Name(id='data', ctx=Load()),
                   slice=Index(value=Constant(value=node.id)),
                   ctx=node.ctx
-              ), node)
+              )
 
    Keep in mind that if the node you're operating on has child nodes you must
    either transform the child nodes yourself or call the :meth:`generic_visit`
@@ -307,6 +318,14 @@ and classes for traversing abstract syntax trees:
    statement nodes), the visitor may also return a list of nodes rather than
    just a single node.
 
+   If :class:`NodeTransformer` introduces new nodes (that weren't part of
+   original tree) without giving them location information (such as
+   :attr:`lineno`), :func:`fix_missing_locations` should be called with
+   the new sub-tree to recalculate the location information::
+
+      tree = ast.parse('foo', mode='eval')
+      new_tree = fix_missing_locations(RewriteName().visit(tree))
+
    Usually you use the transformer like this::
 
       node = YourTransformer().visit(node)
@@ -315,11 +334,12 @@ and classes for traversing abstract syntax trees:
 .. function:: dump(node, annotate_fields=True, include_attributes=False)
 
    Return a formatted dump of the tree in *node*.  This is mainly useful for
-   debugging purposes.  The returned string will show the names and the values
-   for fields.  This makes the code impossible to evaluate, so if evaluation is
-   wanted *annotate_fields* must be set to ``False``.  Attributes such as line
+   debugging purposes.  If *annotate_fields* is true (by default),
+   the returned string will show the names and the values for fields.
+   If *annotate_fields* is false, the result string will be more compact by
+   omitting unambiguous field names.  Attributes such as line
    numbers and column offsets are not dumped by default.  If this is wanted,
-   *include_attributes* can be set to ``True``.
+   *include_attributes* can be set to true.
 
 .. seealso::
 

@@ -276,7 +276,9 @@ PyByteArray_Concat(PyObject *a, PyObject *b)
 
     result = (PyByteArrayObject *) \
         PyByteArray_FromStringAndSize(NULL, va.len + vb.len);
-    if (result != NULL) {
+    // result->ob_bytes is NULL if result is an empty string:
+    // if va.len + vb.len equals zero.
+    if (result != NULL && result->ob_bytes != NULL) {
         memcpy(result->ob_bytes, va.buf, va.len);
         memcpy(result->ob_bytes + va.len, vb.buf, vb.len);
     }
@@ -1698,6 +1700,10 @@ bytearray_extend(PyByteArrayObject *self, PyObject *iterable_of_ints)
     }
     Py_DECREF(bytearray_obj);
 
+    if (PyErr_Occurred()) {
+        return NULL;
+    }
+
     Py_RETURN_NONE;
 }
 
@@ -2059,9 +2065,10 @@ _common_reduce(PyByteArrayObject *self, int proto)
     _Py_IDENTIFIER(__dict__);
     char *buf;
 
-    dict = _PyObject_GetAttrId((PyObject *)self, &PyId___dict__);
+    if (_PyObject_LookupAttrId((PyObject *)self, &PyId___dict__, &dict) < 0) {
+        return NULL;
+    }
     if (dict == NULL) {
-        PyErr_Clear();
         dict = Py_None;
         Py_INCREF(dict);
     }

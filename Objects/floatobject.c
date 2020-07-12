@@ -43,7 +43,7 @@ static PyTypeObject FloatInfoType;
 PyDoc_STRVAR(floatinfo__doc__,
 "sys.float_info\n\
 \n\
-A structseq holding information about the float type. It contains low level\n\
+A named tuple holding information about the float type. It contains low level\n\
 information about the precision and internal representation. Please study\n\
 your system's :file:`float.h` for more information.");
 
@@ -861,35 +861,6 @@ float_is_integer_impl(PyObject *self)
     return o;
 }
 
-#if 0
-static PyObject *
-float_is_inf(PyObject *v)
-{
-    double x = PyFloat_AsDouble(v);
-    if (x == -1.0 && PyErr_Occurred())
-        return NULL;
-    return PyBool_FromLong((long)Py_IS_INFINITY(x));
-}
-
-static PyObject *
-float_is_nan(PyObject *v)
-{
-    double x = PyFloat_AsDouble(v);
-    if (x == -1.0 && PyErr_Occurred())
-        return NULL;
-    return PyBool_FromLong((long)Py_IS_NAN(x));
-}
-
-static PyObject *
-float_is_finite(PyObject *v)
-{
-    double x = PyFloat_AsDouble(v);
-    if (x == -1.0 && PyErr_Occurred())
-        return NULL;
-    return PyBool_FromLong((long)Py_IS_FINITE(x));
-}
-#endif
-
 /*[clinic input]
 float.__trunc__
 
@@ -1042,7 +1013,7 @@ double_round(double x, int ndigits) {
 /*[clinic input]
 float.__round__
 
-    ndigits as o_ndigits: object = NULL
+    ndigits as o_ndigits: object = None
     /
 
 Return the Integral closest to x, rounding half toward even.
@@ -1052,13 +1023,13 @@ When an argument is passed, work like built-in round(x, ndigits).
 
 static PyObject *
 float___round___impl(PyObject *self, PyObject *o_ndigits)
-/*[clinic end generated code: output=374c36aaa0f13980 input=1ca2316b510293b8]*/
+/*[clinic end generated code: output=374c36aaa0f13980 input=fc0fe25924fbc9ed]*/
 {
     double x, rounded;
     Py_ssize_t ndigits;
 
     x = PyFloat_AsDouble(self);
-    if (o_ndigits == NULL || o_ndigits == Py_None) {
+    if (o_ndigits == Py_None) {
         /* single-argument round or with None ndigits:
          * round to nearest integer */
         rounded = round(x);
@@ -1852,14 +1823,6 @@ static PyMethodDef float_methods[] = {
     FLOAT_FROMHEX_METHODDEF
     FLOAT_HEX_METHODDEF
     FLOAT_IS_INTEGER_METHODDEF
-#if 0
-    {"is_inf",          (PyCFunction)float_is_inf,      METH_NOARGS,
-     "Return True if the float is positive or negative infinite."},
-    {"is_finite",       (PyCFunction)float_is_finite,   METH_NOARGS,
-     "Return True if the float is finite, neither infinite nor NaN."},
-    {"is_nan",          (PyCFunction)float_is_nan,      METH_NOARGS,
-     "Return True if the float is not a number (NaN)."},
-#endif
     FLOAT___GETNEWARGS___METHODDEF
     FLOAT___GETFORMAT___METHODDEF
     FLOAT___SET_FORMAT___METHODDEF

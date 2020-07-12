@@ -444,9 +444,9 @@ def enablerlcompleter():
             def write_history():
                 try:
                     readline.write_history_file(history)
-                except (FileNotFoundError, PermissionError):
-                    # home directory does not exist or is not writable
-                    # https://bugs.python.org/issue19891
+                except OSError:
+                    # bpo-19891, bpo-41193: Home directory does not exist
+                    # or is not writable, or the filesystem is read-only.
                     pass
 
             atexit.register(write_history)
@@ -459,13 +459,6 @@ def venv(known_paths):
     env = os.environ
     if sys.platform == 'darwin' and '__PYVENV_LAUNCHER__' in env:
         executable = sys._base_executable = os.environ['__PYVENV_LAUNCHER__']
-    elif sys.platform == 'win32' and '__PYVENV_LAUNCHER__' in env:
-        executable = sys.executable
-        import _winapi
-        sys._base_executable = _winapi.GetModuleFileName(0)
-        # bpo-35873: Clear the environment variable to avoid it being
-        # inherited by child processes.
-        del os.environ['__PYVENV_LAUNCHER__']
     else:
         executable = sys.executable
     exe_dir, _ = os.path.split(os.path.abspath(executable))

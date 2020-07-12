@@ -261,7 +261,7 @@ error:
 }
 
 PyDoc_STRVAR(build_class_doc,
-"__build_class__(func, name, *bases, metaclass=None, **kwds) -> class\n\
+"__build_class__(func, name, /, *bases, [metaclass], **kwds) -> class\n\
 \n\
 Internal helper function used by the class statement.");
 
@@ -482,6 +482,11 @@ builtin_breakpoint(PyObject *self, PyObject *const *args, Py_ssize_t nargs, PyOb
         PyErr_SetString(PyExc_RuntimeError, "lost sys.breakpointhook");
         return NULL;
     }
+
+    if (PySys_Audit("builtins.breakpoint", "O", hook) < 0) {
+        return NULL;
+    }
+
     Py_INCREF(hook);
     PyObject *retval = _PyObject_Vectorcall(hook, args, nargs, keywords);
     Py_DECREF(hook);
@@ -733,7 +738,7 @@ builtin_compile_impl(PyObject *module, PyObject *source, PyObject *filename,
     }
 
     if (flags &
-        ~(PyCF_MASK | PyCF_MASK_OBSOLETE | PyCF_DONT_IMPLY_DEDENT | PyCF_ONLY_AST | PyCF_TYPE_COMMENTS))
+        ~(PyCF_MASK | PyCF_MASK_OBSOLETE | PyCF_COMPILE_MASK))
     {
         PyErr_SetString(PyExc_ValueError,
                         "compile(): unrecognised flags");
@@ -1792,22 +1797,22 @@ builtin_ord(PyObject *module, PyObject *c)
 /*[clinic input]
 pow as builtin_pow
 
-    x: object
-    y: object
-    z: object = None
-    /
+    base: object
+    exp: object
+    mod: object = None
 
-Equivalent to x**y (with two arguments) or x**y % z (with three arguments)
+Equivalent to base**exp with 2 arguments or base**exp % mod with 3 arguments
 
 Some types, such as ints, are able to use a more efficient algorithm when
 invoked using the three argument form.
 [clinic start generated code]*/
 
 static PyObject *
-builtin_pow_impl(PyObject *module, PyObject *x, PyObject *y, PyObject *z)
-/*[clinic end generated code: output=50a14d5d130d404b input=653d57d38d41fc07]*/
+builtin_pow_impl(PyObject *module, PyObject *base, PyObject *exp,
+                 PyObject *mod)
+/*[clinic end generated code: output=3ca1538221bbf15f input=435dbd48a12efb23]*/
 {
-    return PyNumber_Power(x, y, z);
+    return PyNumber_Power(base, exp, mod);
 }
 
 
@@ -2142,7 +2147,7 @@ builtin_repr(PyObject *module, PyObject *obj)
 round as builtin_round
 
     number: object
-    ndigits: object = NULL
+    ndigits: object = None
 
 Round a number to a given precision in decimal digits.
 
@@ -2152,7 +2157,7 @@ the return value has the same type as the number.  ndigits may be negative.
 
 static PyObject *
 builtin_round_impl(PyObject *module, PyObject *number, PyObject *ndigits)
-/*[clinic end generated code: output=ff0d9dd176c02ede input=854bc3a217530c3d]*/
+/*[clinic end generated code: output=ff0d9dd176c02ede input=275678471d7aca15]*/
 {
     PyObject *round, *result;
 
@@ -2170,7 +2175,7 @@ builtin_round_impl(PyObject *module, PyObject *number, PyObject *ndigits)
         return NULL;
     }
 
-    if (ndigits == NULL || ndigits == Py_None)
+    if (ndigits == Py_None)
         result = _PyObject_CallNoArg(round);
     else
         result = PyObject_CallFunctionObjArgs(round, ndigits, NULL);
@@ -2251,16 +2256,12 @@ builtin_vars(PyObject *self, PyObject *args)
         return NULL;
     if (v == NULL) {
         d = PyEval_GetLocals();
-        if (d == NULL)
-            return NULL;
-        Py_INCREF(d);
+        Py_XINCREF(d);
     }
     else {
-        d = _PyObject_GetAttrId(v, &PyId___dict__);
-        if (d == NULL) {
+        if (_PyObject_LookupAttrId(v, &PyId___dict__, &d) == 0) {
             PyErr_SetString(PyExc_TypeError,
                 "vars() argument must have __dict__ attribute");
-            return NULL;
         }
     }
     return d;
@@ -2544,10 +2545,6 @@ zip_new(PyTypeObject *type, PyObject *args, PyObject *kwds)
         PyObject *item = PyTuple_GET_ITEM(args, i);
         PyObject *it = PyObject_GetIter(item);
         if (it == NULL) {
-            if (PyErr_ExceptionMatches(PyExc_TypeError))
-                PyErr_Format(PyExc_TypeError,
-                    "zip argument #%zd must support iteration",
-                    i+1);
             Py_DECREF(ittuple);
             return NULL;
         }
@@ -2651,12 +2648,15 @@ static PyMethodDef zip_methods[] = {
 };
 
 PyDoc_STRVAR(zip_doc,
-"zip(iter1 [,iter2 [...]]) --> zip object\n\
+"zip(*iterables) --> A zip object yielding tuples until an input is exhausted.\n\
 \n\
-Return a zip object whose .__next__() method returns a tuple where\n\
-the i-th element comes from the i-th iterable argument.  The .__next__()\n\
-method continues until the shortest iterable in the argument sequence\n\
-is exhausted and then it raises StopIteration.");
+   >>> list(zip('abcdefg', range(3), range(4)))\n\
+   [('a', 0, 0), ('b', 1, 1), ('c', 2, 2)]\n\
+\n\
+The zip object yields n-length tuples, where n is the number of iterables\n\
+passed as positional arguments to zip().  The i-th element in every tuple\n\
+comes from the i-th iterable argument to zip().  This continues until the\n\
+shortest argument is exhausted.");
 
 PyTypeObject PyZip_Type = {
     PyVarObject_HEAD_INIT(&PyType_Type, 0)

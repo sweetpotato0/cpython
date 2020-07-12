@@ -13,11 +13,11 @@ At large scale, the structure of the module is following:
 * Public helper functions: get_type_hints, overload, cast, no_type_check,
   no_type_check_decorator.
 * Generic aliases for collections.abc ABCs and few additional protocols.
-* Special types: NewType, NamedTuple, TypedDict (may be added soon).
+* Special types: NewType, NamedTuple, TypedDict.
 * Wrapper submodules for re and io related types.
 """
 
-from abc import abstractmethod, abstractproperty, ABCMeta
+from abc import abstractmethod, ABCMeta
 import collections
 import collections.abc
 import contextlib
@@ -524,11 +524,13 @@ class ForwardRef(_Final, _root=True):
     def __eq__(self, other):
         if not isinstance(other, ForwardRef):
             return NotImplemented
-        return (self.__forward_arg__ == other.__forward_arg__ and
-                self.__forward_value__ == other.__forward_value__)
+        if self.__forward_evaluated__ and other.__forward_evaluated__:
+            return (self.__forward_arg__ == other.__forward_arg__ and
+                    self.__forward_value__ == other.__forward_value__)
+        return self.__forward_arg__ == other.__forward_arg__
 
     def __hash__(self):
-        return hash((self.__forward_arg__, self.__forward_value__))
+        return hash(self.__forward_arg__)
 
     def __repr__(self):
         return f'ForwardRef({self.__forward_arg__!r})'
@@ -598,7 +600,10 @@ class TypeVar(_Final, _Immutable, _root=True):
             self.__bound__ = _type_check(bound, "Bound must be a type.")
         else:
             self.__bound__ = None
-        def_mod = sys._getframe(1).f_globals['__name__']  # for pickling
+        try:
+            def_mod = sys._getframe(1).f_globals.get('__name__', '__main__')  # for pickling
+        except (AttributeError, ValueError):
+            def_mod = None
         if def_mod != 'typing':
             self.__module__ = def_mod
 
@@ -989,10 +994,13 @@ def _allow_reckless_class_cheks():
         return True
 
 
-_PROTO_WHITELIST = ['Callable', 'Awaitable',
-                    'Iterable', 'Iterator', 'AsyncIterable', 'AsyncIterator',
-                    'Hashable', 'Sized', 'Container', 'Collection', 'Reversible',
-                    'ContextManager', 'AsyncContextManager']
+_PROTO_WHITELIST = {
+    'collections.abc': [
+        'Callable', 'Awaitable', 'Iterable', 'Iterator', 'AsyncIterable',
+        'Hashable', 'Sized', 'Container', 'Collection', 'Reversible',
+    ],
+    'contextlib': ['AbstractContextManager', 'AbstractAsyncContextManager'],
+}
 
 
 class _ProtocolMeta(ABCMeta):
@@ -1105,7 +1113,8 @@ class Protocol(Generic, metaclass=_ProtocolMeta):
         # ... otherwise check consistency of bases, and prohibit instantiation.
         for base in cls.__bases__:
             if not (base in (object, Generic) or
-                    base.__module__ == 'collections.abc' and base.__name__ in _PROTO_WHITELIST or
+                    base.__module__ in _PROTO_WHITELIST and
+                    base.__name__ in _PROTO_WHITELIST[base.__module__] or
                     issubclass(base, Generic) and base._is_protocol):
                 raise TypeError('Protocols can only inherit from other'
                                 ' protocols, got %r' % base)
@@ -1228,7 +1237,11 @@ def get_type_hints(obj, globalns=None, localns=None):
         if isinstance(obj, types.ModuleType):
             globalns = obj.__dict__
         else:
-            globalns = getattr(obj, '__globals__', {})
+            nsobj = obj
+            # Find globalns for the unwrapped object.
+            while hasattr(nsobj, '__wrapped__'):
+                nsobj = nsobj.__wrapped__
+            globalns = getattr(nsobj, '__globals__', {})
         if localns is None:
             localns = globalns
     elif localns is None:
@@ -1287,7 +1300,7 @@ def get_args(tp):
         get_args(Union[int, Tuple[T, int]][str]) == (int, Tuple[str, int])
         get_args(Callable[[], T][int]) == ([], int)
     """
-    if isinstance(tp, _GenericAlias):
+    if isinstance(tp, _GenericAlias) and not tp._special:
         res = tp.__args__
         if get_origin(tp) is collections.abc.Callable and res[0] is not Ellipsis:
             res = (list(res[:-1]), res[-1])
@@ -1507,6 +1520,7 @@ Type.__doc__ = \
 
 @runtime_checkable
 class SupportsInt(Protocol):
+    """An ABC with one abstract method __int__."""
     __slots__ = ()
 
     @abstractmethod
@@ -1516,6 +1530,7 @@ class SupportsInt(Protocol):
 
 @runtime_checkable
 class SupportsFloat(Protocol):
+    """An ABC with one abstract method __float__."""
     __slots__ = ()
 
     @abstractmethod
@@ -1525,6 +1540,7 @@ class SupportsFloat(Protocol):
 
 @runtime_checkable
 class SupportsComplex(Protocol):
+    """An ABC with one abstract method __complex__."""
     __slots__ = ()
 
     @abstractmethod
@@ -1534,6 +1550,7 @@ class SupportsComplex(Protocol):
 
 @runtime_checkable
 class SupportsBytes(Protocol):
+    """An ABC with one abstract method __bytes__."""
     __slots__ = ()
 
     @abstractmethod
@@ -1543,6 +1560,7 @@ class SupportsBytes(Protocol):
 
 @runtime_checkable
 class SupportsIndex(Protocol):
+    """An ABC with one abstract method __index__."""
     __slots__ = ()
 
     @abstractmethod
@@ -1552,6 +1570,7 @@ class SupportsIndex(Protocol):
 
 @runtime_checkable
 class SupportsAbs(Protocol[T_co]):
+    """An ABC with one abstract method __abs__ that is covariant in its return type."""
     __slots__ = ()
 
     @abstractmethod
@@ -1561,6 +1580,7 @@ class SupportsAbs(Protocol[T_co]):
 
 @runtime_checkable
 class SupportsRound(Protocol[T_co]):
+    """An ABC with one abstract method __round__ that is covariant in its return type."""
     __slots__ = ()
 
     @abstractmethod
@@ -1587,7 +1607,7 @@ _prohibited = ('__new__', '__init__', '__slots__', '__getnewargs__',
                '_fields', '_field_defaults', '_field_types',
                '_make', '_replace', '_asdict', '_source')
 
-_special = ('__module__', '__name__', '__qualname__', '__annotations__')
+_special = ('__module__', '__name__', '__annotations__')
 
 
 class NamedTupleMeta(type):
@@ -1647,35 +1667,63 @@ class NamedTuple(metaclass=NamedTupleMeta):
     """
     _root = True
 
-    def __new__(self, typename, fields=None, **kwargs):
+    def __new__(*args, **kwargs):
+        if not args:
+            raise TypeError('NamedTuple.__new__(): not enough arguments')
+        cls, *args = args  # allow the "cls" keyword be passed
+        if args:
+            typename, *args = args # allow the "typename" keyword be passed
+        elif 'typename' in kwargs:
+            typename = kwargs.pop('typename')
+            import warnings
+            warnings.warn("Passing 'typename' as keyword argument is deprecated",
+                          DeprecationWarning, stacklevel=2)
+        else:
+            raise TypeError("NamedTuple.__new__() missing 1 required positional "
+                            "argument: 'typename'")
+        if args:
+            try:
+                fields, = args # allow the "fields" keyword be passed
+            except ValueError:
+                raise TypeError(f'NamedTuple.__new__() takes from 2 to 3 '
+                                f'positional arguments but {len(args) + 2} '
+                                f'were given') from None
+        elif 'fields' in kwargs and len(kwargs) == 1:
+            fields = kwargs.pop('fields')
+            import warnings
+            warnings.warn("Passing 'fields' as keyword argument is deprecated",
+                          DeprecationWarning, stacklevel=2)
+        else:
+            fields = None
+
         if fields is None:
             fields = kwargs.items()
         elif kwargs:
             raise TypeError("Either list of fields or keywords"
                             " can be provided to NamedTuple, not both")
         return _make_nmtuple(typename, fields)
+    __new__.__text_signature__ = '($cls, typename, fields=None, /, **kwargs)'
 
 
-def _dict_new(cls, *args, **kwargs):
+def _dict_new(cls, /, *args, **kwargs):
     return dict(*args, **kwargs)
 
 
-def _typeddict_new(cls, _typename, _fields=None, **kwargs):
-    total = kwargs.pop('total', True)
-    if _fields is None:
-        _fields = kwargs
+def _typeddict_new(cls, typename, fields=None, /, *, total=True, **kwargs):
+    if fields is None:
+        fields = kwargs
     elif kwargs:
         raise TypeError("TypedDict takes either a dict or keyword arguments,"
                         " but not both")
 
-    ns = {'__annotations__': dict(_fields), '__total__': total}
+    ns = {'__annotations__': dict(fields), '__total__': total}
     try:
         # Setting correct module is necessary to make typed dict classes pickleable.
         ns['__module__'] = sys._getframe(1).f_globals.get('__name__', '__main__')
     except (AttributeError, ValueError):
         pass
 
-    return _TypedDictMeta(_typename, (), ns)
+    return _TypedDictMeta(typename, (), ns)
 
 
 def _check_fails(cls, other):
@@ -1734,6 +1782,19 @@ class TypedDict(dict, metaclass=_TypedDictMeta):
         Point2D = TypedDict('Point2D', x=int, y=int, label=str)
         Point2D = TypedDict('Point2D', {'x': int, 'y': int, 'label': str})
 
+    By default, all keys must be present in a TypedDict. It is possible
+    to override this by specifying totality.
+    Usage::
+
+        class point2D(TypedDict, total=False):
+            x: int
+            y: int
+
+    This means that a point2D TypedDict can have any of the keys omitted.A type
+    checker is only expected to support a literal False or True as the value of
+    the total argument. True is the default, and makes all items defined in the
+    class body be required.
+
     The class syntax is only supported in Python 3.6+, while two other
     syntax forms work for Python 2.7 and 3.2+
     """
@@ -1789,11 +1850,13 @@ class IO(Generic[AnyStr]):
 
     __slots__ = ()
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def mode(self) -> str:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def name(self) -> str:
         pass
 
@@ -1801,6 +1864,7 @@ class IO(Generic[AnyStr]):
     def close(self) -> None:
         pass
 
+    @property
     @abstractmethod
     def closed(self) -> bool:
         pass
@@ -1889,23 +1953,28 @@ class TextIO(IO[str]):
 
     __slots__ = ()
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def buffer(self) -> BinaryIO:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def encoding(self) -> str:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def errors(self) -> Optional[str]:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def line_buffering(self) -> bool:
         pass
 
-    @abstractproperty
+    @property
+    @abstractmethod
     def newlines(self) -> Any:
         pass
 

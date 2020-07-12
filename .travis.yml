@@ -1,6 +1,5 @@
 language: c
 dist: xenial
-group: beta
 
 # To cache doc-building dependencies and C compiler output.
 cache:
@@ -11,11 +10,10 @@ cache:
 
 env:
   global:
-    - OPENSSL=1.1.1c
+    - OPENSSL=1.1.1f
     - OPENSSL_DIR="$HOME/multissl/openssl/${OPENSSL}"
     - PATH="${OPENSSL_DIR}/bin:$PATH"
-    # Use -O3 because we don't use debugger on Travis-CI
-    - CFLAGS="-I${OPENSSL_DIR}/include -O3"
+    - CFLAGS="-I${OPENSSL_DIR}/include"
     - LDFLAGS="-L${OPENSSL_DIR}/lib"
     # Set rpath with env var instead of -Wl,-rpath linker flag
     # OpenSSL ignores LDFLAGS when linking bin/openssl
@@ -43,6 +41,7 @@ matrix:
       addons:
         apt:
           packages:
+            - gdb
             - xvfb
     - name: "Documentation build"
       os: linux
@@ -73,16 +72,6 @@ matrix:
         - make -C Doc/ PYTHON=../python venv
       script:
         xvfb-run make -C Doc/ PYTHON=../python SPHINXOPTS="-q -W -j4" doctest
-    - name: "Mac OS X tests"
-      os: osx
-      language: c
-      compiler: clang
-      # Testing under macOS is optional until testing stability has been demonstrated.
-      env: OPTIONAL=true
-      before_install:
-        # Python 3 is needed for Argument Clinic and multissl
-        - HOMEBREW_NO_AUTO_UPDATE=1 brew install xz python3
-        - export PATH=$(brew --prefix)/bin:$(brew --prefix)/sbin:$PATH
     - name: "Test code coverage (Python)"
       os: linux
       language: c
@@ -93,6 +82,12 @@ matrix:
           packages:
             - xvfb
       before_script:
+        - |
+            if [[ "$TRAVIS_PULL_REQUEST" != "false" ]]
+            then
+              echo "Don't run Python coverage on pull requests."
+              exit
+            fi
         - ./configure
         - make -j4
         # Need a venv that can parse covered code.
@@ -117,6 +112,12 @@ matrix:
             - lcov
             - xvfb
       before_script:
+        - |
+            if [[ "$TRAVIS_PULL_REQUEST" != "false" ]]
+            then
+              echo "Don't run C coverage on pull requests."
+              exit
+            fi
         - ./configure
       script:
         - xvfb-run make -j4 coverage-report
@@ -166,7 +167,8 @@ install:
 
 # Travis provides only 2 cores, so don't overdo the parallelism and waste memory.
 before_script:
-  - ./configure --with-pydebug
+  # -Og is much faster than -O0
+  - CFLAGS="${CFLAGS} -Og" ./configure --with-pydebug
   - make -j4 regen-all
   - changes=`git status --porcelain`
   - |

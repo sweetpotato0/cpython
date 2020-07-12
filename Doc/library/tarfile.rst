@@ -290,9 +290,10 @@ be finalized; only the internally used file object will be closed. See the
 
       *fileobj* is not closed, when :class:`TarFile` is closed.
 
-   *format* controls the archive format. It must be one of the constants
+   *format* controls the archive format for writing. It must be one of the constants
    :const:`USTAR_FORMAT`, :const:`GNU_FORMAT` or :const:`PAX_FORMAT` that are
-   defined at module level.
+   defined at module level. When reading, format will be automatically detected, even
+   if different formats are present in a single archive.
 
    The *tarinfo* argument can be used to replace the default :class:`TarInfo` class
    with a different one.
@@ -783,7 +784,7 @@ How to read a gzip compressed tar archive and display some member information::
    import tarfile
    tar = tarfile.open("sample.tar.gz", "r:gz")
    for tarinfo in tar:
-       print(tarinfo.name, "is", tarinfo.size, "bytes in size and is", end="")
+       print(tarinfo.name, "is", tarinfo.size, "bytes in size and is ", end="")
        if tarinfo.isreg():
            print("a regular file.")
        elif tarinfo.isdir():

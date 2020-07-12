@@ -39,7 +39,7 @@ Size of indices is dk_size.  Type of each index in indices is vary on dk_size:
 * int32 for 2**16 <= dk_size <= 2**31
 * int64 for 2**32 <= dk_size
 
-dk_entries is array of PyDictKeyEntry.  It's size is USABLE_FRACTION(dk_size).
+dk_entries is array of PyDictKeyEntry.  Its size is USABLE_FRACTION(dk_size).
 DK_ENTRIES(dk) can be used to get pointer to entries.
 
 NOTE: Since negative value is used for DKIX_EMPTY and DKIX_DUMMY, type of
@@ -459,23 +459,26 @@ static PyObject *empty_values[1] = { NULL };
 int
 _PyDict_CheckConsistency(PyObject *op, int check_content)
 {
-#ifndef NDEBUG
-    _PyObject_ASSERT(op, PyDict_Check(op));
+#define CHECK(expr) \
+    do { if (!(expr)) { _PyObject_ASSERT_FAILED_MSG(op, Py_STRINGIFY(expr)); } } while (0)
+
+    assert(op != NULL);
+    CHECK(PyDict_Check(op));
     PyDictObject *mp = (PyDictObject *)op;
 
     PyDictKeysObject *keys = mp->ma_keys;
     int splitted = _PyDict_HasSplitTable(mp);
     Py_ssize_t usable = USABLE_FRACTION(keys->dk_size);
 
-    _PyObject_ASSERT(op, 0 <= mp->ma_used && mp->ma_used <= usable);
-    _PyObject_ASSERT(op, IS_POWER_OF_2(keys->dk_size));
-    _PyObject_ASSERT(op, 0 <= keys->dk_usable && keys->dk_usable <= usable);
-    _PyObject_ASSERT(op, 0 <= keys->dk_nentries && keys->dk_nentries <= usable);
-    _PyObject_ASSERT(op, keys->dk_usable + keys->dk_nentries <= usable);
+    CHECK(0 <= mp->ma_used && mp->ma_used <= usable);
+    CHECK(IS_POWER_OF_2(keys->dk_size));
+    CHECK(0 <= keys->dk_usable && keys->dk_usable <= usable);
+    CHECK(0 <= keys->dk_nentries && keys->dk_nentries <= usable);
+    CHECK(keys->dk_usable + keys->dk_nentries <= usable);
 
     if (!splitted) {
         /* combined table */
-        _PyObject_ASSERT(op, keys->dk_refcnt == 1);
+        CHECK(keys->dk_refcnt == 1);
     }
 
     if (check_content) {
@@ -484,7 +487,7 @@ _PyDict_CheckConsistency(PyObject *op, int check_content)
 
         for (i=0; i < keys->dk_size; i++) {
             Py_ssize_t ix = dictkeys_get_index(keys, i);
-            _PyObject_ASSERT(op, DKIX_DUMMY <= ix && ix <= usable);
+            CHECK(DKIX_DUMMY <= ix && ix <= usable);
         }
 
         for (i=0; i < usable; i++) {
@@ -494,32 +497,33 @@ _PyDict_CheckConsistency(PyObject *op, int check_content)
             if (key != NULL) {
                 if (PyUnicode_CheckExact(key)) {
                     Py_hash_t hash = ((PyASCIIObject *)key)->hash;
-                    _PyObject_ASSERT(op, hash != -1);
-                    _PyObject_ASSERT(op, entry->me_hash == hash);
+                    CHECK(hash != -1);
+                    CHECK(entry->me_hash == hash);
                 }
                 else {
                     /* test_dict fails if PyObject_Hash() is called again */
-                    _PyObject_ASSERT(op, entry->me_hash != -1);
+                    CHECK(entry->me_hash != -1);
                 }
                 if (!splitted) {
-                    _PyObject_ASSERT(op, entry->me_value != NULL);
+                    CHECK(entry->me_value != NULL);
                 }
             }
 
             if (splitted) {
-                _PyObject_ASSERT(op, entry->me_value == NULL);
+                CHECK(entry->me_value == NULL);
             }
         }
 
         if (splitted) {
             /* splitted table */
             for (i=0; i < mp->ma_used; i++) {
-                _PyObject_ASSERT(op, mp->ma_values[i] != NULL);
+                CHECK(mp->ma_values[i] != NULL);
             }
         }
     }
-#endif
     return 1;
+
+#undef CHECK
 }
 
 
@@ -1129,7 +1133,7 @@ insert_to_emptydict(PyDictObject *mp, PyObject *key, Py_hash_t hash,
     MAINTAIN_TRACKING(mp, key, value);
 
     size_t hashpos = (size_t)hash & (PyDict_MINSIZE-1);
-    PyDictKeyEntry *ep = &DK_ENTRIES(mp->ma_keys)[0];
+    PyDictKeyEntry *ep = DK_ENTRIES(mp->ma_keys);
     dictkeys_set_index(mp->ma_keys, hashpos, 0);
     ep->me_key = key;
     ep->me_hash = hash;
@@ -2769,9 +2773,11 @@ dict_equal(PyDictObject *a, PyDictObject *b)
                     return -1;
                 return 0;
             }
+            Py_INCREF(bval);
             cmp = PyObject_RichCompareBool(aval, bval, Py_EQ);
             Py_DECREF(key);
             Py_DECREF(aval);
+            Py_DECREF(bval);
             if (cmp <= 0)  /* error or not equal */
                 return cmp;
         }
@@ -2987,23 +2993,37 @@ dict_clear(PyDictObject *mp, PyObject *Py_UNUSED(ignored))
     Py_RETURN_NONE;
 }
 
-/*[clinic input]
-dict.pop
+/*
+We don't use Argument Clinic for dict.pop because it doesn't support
+custom signature for now.
+*/
+PyDoc_STRVAR(dict_pop__doc__,
+"D.pop(k[,d]) -> v, remove specified key and return the corresponding value.\n\
+If key is not found, d is returned if given, otherwise KeyError is raised");
 
-    key: object
-    default: object = NULL
-    /
-
-Remove specified key and return the corresponding value.
-
-If key is not found, default is returned if given, otherwise KeyError is raised
-[clinic start generated code]*/
+#define DICT_POP_METHODDEF    \
+    {"pop", (PyCFunction)(void(*)(void))dict_pop, METH_FASTCALL, dict_pop__doc__},
 
 static PyObject *
-dict_pop_impl(PyDictObject *self, PyObject *key, PyObject *default_value)
-/*[clinic end generated code: output=3abb47b89f24c21c input=016f6a000e4e633b]*/
+dict_pop(PyDictObject *self, PyObject *const *args, Py_ssize_t nargs)
 {
-    return _PyDict_Pop((PyObject*)self, key, default_value);
+    PyObject *return_value = NULL;
+    PyObject *key;
+    PyObject *default_value = NULL;
+
+    if (!_PyArg_CheckPositional("pop", nargs, 1, 2)) {
+        goto exit;
+    }
+    key = args[0];
+    if (nargs < 2) {
+        goto skip_optional;
+    }
+    default_value = args[1];
+skip_optional:
+    return_value = _PyDict_Pop((PyObject*)self, key, default_value);
+
+exit:
+    return return_value;
 }
 
 /*[clinic input]
@@ -3444,10 +3464,15 @@ dictiter_new(PyDictObject *dict, PyTypeObject *itertype)
     di->di_dict = dict;
     di->di_used = dict->ma_used;
     di->len = dict->ma_used;
-    if ((itertype == &PyDictRevIterKey_Type ||
+    if (itertype == &PyDictRevIterKey_Type ||
          itertype == &PyDictRevIterItem_Type ||
-         itertype == &PyDictRevIterValue_Type) && dict->ma_used) {
+         itertype == &PyDictRevIterValue_Type) {
+        if (dict->ma_values) {
+            di->di_pos = dict->ma_used - 1;
+        }
+        else {
             di->di_pos = dict->ma_keys->dk_nentries - 1;
+        }
     }
     else {
         di->di_pos = 0;
@@ -3817,22 +3842,21 @@ dictreviter_iternext(dictiterobject *di)
     PyDictKeysObject *k = d->ma_keys;
     PyObject *key, *value, *result;
 
+    if (i < 0) {
+        goto fail;
+    }
     if (d->ma_values) {
-        if (i < 0) {
-            goto fail;
-        }
         key = DK_ENTRIES(k)[i].me_key;
         value = d->ma_values[i];
         assert (value != NULL);
     }
     else {
         PyDictKeyEntry *entry_ptr = &DK_ENTRIES(k)[i];
-        while (i >= 0 && entry_ptr->me_value == NULL) {
+        while (entry_ptr->me_value == NULL) {
+            if (--i < 0) {
+                goto fail;
+            }
             entry_ptr--;
-            i--;
-        }
-        if (i < 0) {
-            goto fail;
         }
         key = entry_ptr->me_key;
         value = entry_ptr->me_value;

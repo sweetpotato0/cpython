@@ -120,9 +120,9 @@ High-level Module Interface
 
    This is an alias for the builtin :func:`open` function.
 
-   .. audit-event:: open "path mode flags"
+   .. audit-event:: open path,mode,flags io.open
 
-      This function raises an :func:`auditing event <sys.audit>` ``open`` with
+      This function raises an :ref:`auditing event <auditing>` ``open`` with
       arguments ``path``, ``mode`` and ``flags``. The ``mode`` and ``flags``
       arguments may have been modified or inferred from the original call.
 
@@ -132,12 +132,13 @@ High-level Module Interface
    Opens the provided file with mode ``'rb'``. This function should be used
    when the intent is to treat the contents as executable code.
 
-   ``path`` should be an absolute path.
+   ``path`` should be a :class:`str` and an absolute path.
 
    The behavior of this function may be overridden by an earlier call to the
-   :c:func:`PyFile_SetOpenCodeHook`, however, it should always be considered
-   interchangeable with ``open(path, 'rb')``. Overriding the behavior is
-   intended for additional validation or preprocessing of the file.
+   :c:func:`PyFile_SetOpenCodeHook`. However, assuming that ``path`` is a
+   :class:`str` and an absolute path, ``open_code(path)`` should always behave
+   the same as ``open(path, 'rb')``. Overriding the behavior is intended for
+   additional validation or preprocessing of the file.
 
    .. versionadded:: 3.8
 
@@ -327,7 +328,7 @@ I/O Base Classes
       Note that it's already possible to iterate on file objects using ``for
       line in file: ...`` without calling ``file.readlines()``.
 
-   .. method:: seek(offset[, whence])
+   .. method:: seek(offset, whence=SEEK_SET)
 
       Change the stream position to the given byte *offset*.  *offset* is
       interpreted relative to the position indicated by *whence*.  The default
@@ -831,7 +832,7 @@ Text I/O
 
       If *size* is specified, at most *size* characters will be read.
 
-   .. method:: seek(offset[, whence])
+   .. method:: seek(offset, whence=SEEK_SET)
 
       Change the stream position to the given *offset*.  Behaviour depends on
       the *whence* parameter.  The default value for *whence* is

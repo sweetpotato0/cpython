@@ -5,7 +5,6 @@
 import os
 import subprocess
 import sys
-import sysconfig
 import tempfile
 import unittest
 from test import support
@@ -740,6 +739,17 @@ class CmdLineTest(unittest.TestCase):
                               executable=executable)
         self.assertEqual(proc.returncode, 0, proc)
         self.assertEqual(proc.stdout.strip(), b'0')
+
+    def test_parsing_error(self):
+        args = [sys.executable, '-I', '--unknown-option']
+        proc = subprocess.run(args,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              text=True)
+        err_msg = "unknown option --unknown-option\nusage: "
+        self.assertTrue(proc.stderr.startswith(err_msg), proc.stderr)
+        self.assertNotEqual(proc.returncode, 0)
+
 
 @unittest.skipIf(interpreter_requires_environment(),
                  'Cannot run -I tests when PYTHON env vars are required.')

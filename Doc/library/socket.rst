@@ -374,6 +374,9 @@ Constants
 
    .. availability:: Linux >= 2.6.25.
 
+   .. note::
+      The :data:`CAN_BCM_CAN_FD_FRAME` flag is only available on Linux >= 4.8.
+
    .. versionadded:: 3.4
 
 .. data:: CAN_RAW_FD_FRAMES
@@ -526,7 +529,7 @@ The following functions all create :ref:`socket objects <socket-objects>`.
 
    The newly created socket is :ref:`non-inheritable <fd_inheritance>`.
 
-   .. audit-event:: socket.__new__ "self family type protocol"
+   .. audit-event:: socket.__new__ self,family,type,protocol socket.socket
 
    .. versionchanged:: 3.3
       The AF_CAN family was added.
@@ -545,7 +548,9 @@ The following functions all create :ref:`socket objects <socket-objects>`.
       When :const:`SOCK_NONBLOCK` or :const:`SOCK_CLOEXEC`
       bit flags are applied to *type* they are cleared, and
       :attr:`socket.type` will not reflect them.  They are still passed
-      to the underlying system `socket()` call.  Therefore::
+      to the underlying system `socket()` call.  Therefore,
+
+      ::
 
           sock = socket.socket(
               socket.AF_INET,
@@ -720,7 +725,7 @@ The :mod:`socket` module also offers various network-related services:
    :const:`AF_INET6`), and is meant to be passed to the :meth:`socket.connect`
    method.
 
-   .. audit-event:: socket.getaddrinfo "host port family type protocol"
+   .. audit-event:: socket.getaddrinfo host,port,family,type,protocol socket.getaddrinfo
 
    The following example fetches address information for a hypothetical TCP
    connection to ``example.org`` on port 80 (results may differ on your
@@ -757,7 +762,7 @@ The :mod:`socket` module also offers various network-related services:
    interface. :func:`gethostbyname` does not support IPv6 name resolution, and
    :func:`getaddrinfo` should be used instead for IPv4/v6 dual stack support.
 
-   .. audit-event:: socket.gethostbyname hostname
+   .. audit-event:: socket.gethostbyname hostname socket.gethostbyname
 
 
 .. function:: gethostbyname_ex(hostname)
@@ -771,7 +776,7 @@ The :mod:`socket` module also offers various network-related services:
    resolution, and :func:`getaddrinfo` should be used instead for IPv4/v6 dual
    stack support.
 
-   .. audit-event:: socket.gethostbyname hostname
+   .. audit-event:: socket.gethostbyname hostname socket.gethostbyname_ex
 
 
 .. function:: gethostname()
@@ -779,7 +784,7 @@ The :mod:`socket` module also offers various network-related services:
    Return a string containing the hostname of the machine where  the Python
    interpreter is currently executing.
 
-   .. audit-event:: socket.gethostname
+   .. audit-event:: socket.gethostname "" socket.gethostname
 
    Note: :func:`gethostname` doesn't always return the fully qualified domain
    name; use :func:`getfqdn` for that.
@@ -795,7 +800,7 @@ The :mod:`socket` module also offers various network-related services:
    domain name, use the function :func:`getfqdn`. :func:`gethostbyaddr` supports
    both IPv4 and IPv6.
 
-   .. audit-event:: socket.gethostbyaddr ip_address
+   .. audit-event:: socket.gethostbyaddr ip_address socket.gethostbyaddr
 
 
 .. function:: getnameinfo(sockaddr, flags)
@@ -810,7 +815,7 @@ The :mod:`socket` module also offers various network-related services:
 
    For more information about *flags* you can consult :manpage:`getnameinfo(3)`.
 
-   .. audit-event:: socket.getnameinfo sockaddr
+   .. audit-event:: socket.getnameinfo sockaddr socket.getnameinfo
 
 .. function:: getprotobyname(protocolname)
 
@@ -827,7 +832,7 @@ The :mod:`socket` module also offers various network-related services:
    service.  The optional protocol name, if given, should be ``'tcp'`` or
    ``'udp'``, otherwise any protocol will match.
 
-   .. audit-event:: socket.getservbyname "servicename protocolname"
+   .. audit-event:: socket.getservbyname servicename,protocolname socket.getservbyname
 
 
 .. function:: getservbyport(port[, protocolname])
@@ -836,7 +841,7 @@ The :mod:`socket` module also offers various network-related services:
    service.  The optional protocol name, if given, should be ``'tcp'`` or
    ``'udp'``, otherwise any protocol will match.
 
-   .. audit-event:: socket.getservbyport "port protocolname"
+   .. audit-event:: socket.getservbyport port,protocolname socket.getservbyport
 
 
 .. function:: ntohl(x)
@@ -1021,7 +1026,7 @@ The :mod:`socket` module also offers various network-related services:
    Set the machine's hostname to *name*.  This will raise an
    :exc:`OSError` if you don't have enough rights.
 
-   .. audit-event:: socket.sethostname name
+   .. audit-event:: socket.sethostname name socket.sethostname
 
    .. availability:: Unix.
 
@@ -1107,7 +1112,7 @@ to sockets.
    Bind the socket to *address*.  The socket must not already be bound. (The format
    of *address* depends on the address family --- see above.)
 
-   .. audit-event:: socket.bind "self address"
+   .. audit-event:: socket.bind self,address socket.socket.bind
 
 .. method:: socket.close()
 
@@ -1145,7 +1150,7 @@ to sockets.
    :exc:`InterruptedError` exception if the connection is interrupted by a
    signal (or the exception raised by the signal handler).
 
-   .. audit-event:: socket.connect "self address"
+   .. audit-event:: socket.connect self,address socket.socket.connect
 
    .. versionchanged:: 3.5
       The method now waits until the connection completes instead of raising an
@@ -1163,7 +1168,7 @@ to sockets.
    :c:data:`errno` variable.  This is useful to support, for example, asynchronous
    connects.
 
-   .. audit-event:: socket.connect "self address"
+   .. audit-event:: socket.connect self,address socket.socket.connect_ex
 
 .. method:: socket.detach()
 
@@ -1391,9 +1396,9 @@ to sockets.
           fds = array.array("i")   # Array of ints
           msg, ancdata, flags, addr = sock.recvmsg(msglen, socket.CMSG_LEN(maxfds * fds.itemsize))
           for cmsg_level, cmsg_type, cmsg_data in ancdata:
-              if (cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS):
+              if cmsg_level == socket.SOL_SOCKET and cmsg_type == socket.SCM_RIGHTS:
                   # Append data, ignoring any truncated integers at the end.
-                  fds.fromstring(cmsg_data[:len(cmsg_data) - (len(cmsg_data) % fds.itemsize)])
+                  fds.frombytes(cmsg_data[:len(cmsg_data) - (len(cmsg_data) % fds.itemsize)])
           return msg, list(fds)
 
    .. availability:: most Unix platforms, possibly others.
@@ -1505,7 +1510,7 @@ to sockets.
    bytes sent. (The format of *address* depends on the address family --- see
    above.)
 
-   .. audit-event:: socket.sendto "self address"
+   .. audit-event:: socket.sendto self,address socket.socket.sendto
 
    .. versionchanged:: 3.5
       If the system call is interrupted and the signal handler does not raise
@@ -1546,7 +1551,7 @@ to sockets.
 
    .. availability:: most Unix platforms, possibly others.
 
-   .. audit-event:: socket.sendmsg "self address"
+   .. audit-event:: socket.sendmsg self,address socket.socket.sendmsg
 
    .. versionadded:: 3.3
 
@@ -1632,9 +1637,9 @@ to sockets.
    ``None`` or a :term:`bytes-like object` representing a buffer. In the later
    case it is up to the caller to ensure that the bytestring contains the
    proper bits (see the optional built-in module :mod:`struct` for a way to
-   encode C structures as bytestrings). When value is set to ``None``,
-   optlen argument is required. It's equivalent to call setsockopt C
-   function with optval=NULL and optlen=optlen.
+   encode C structures as bytestrings). When *value* is set to ``None``,
+   *optlen* argument is required. It's equivalent to call :c:func:`setsockopt` C
+   function with ``optval=NULL`` and ``optlen=optlen``.
 
 
    .. versionchanged:: 3.5

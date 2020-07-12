@@ -1,6 +1,7 @@
 
 /* Tokenizer implementation */
 
+#define PY_SSIZE_T_CLEAN
 #include "Python.h"
 
 #include <ctype.h>
@@ -886,6 +887,7 @@ tok_nextc(struct tok_state *tok)
                 size_t start = tok->start - tok->buf;
                 size_t oldlen = tok->cur - tok->buf;
                 size_t newlen = oldlen + strlen(newtok);
+                Py_ssize_t cur_multi_line_start = tok->multi_line_start - tok->buf;
                 char *buf = tok->buf;
                 buf = (char *)PyMem_REALLOC(buf, newlen+1);
                 tok->lineno++;
@@ -898,6 +900,7 @@ tok_nextc(struct tok_state *tok)
                 }
                 tok->buf = buf;
                 tok->cur = tok->buf + oldlen;
+                tok->multi_line_start = tok->buf + cur_multi_line_start;
                 tok->line_start = tok->cur;
                 strcpy(tok->buf + oldlen, newtok);
                 PyMem_FREE(newtok);
@@ -956,6 +959,7 @@ tok_nextc(struct tok_state *tok)
             while (!done) {
                 Py_ssize_t curstart = tok->start == NULL ? -1 :
                           tok->start - tok->buf;
+                Py_ssize_t cur_multi_line_start = tok->multi_line_start - tok->buf;
                 Py_ssize_t curvalid = tok->inp - tok->buf;
                 Py_ssize_t newsize = curvalid + BUFSIZ;
                 char *newbuf = tok->buf;
@@ -968,6 +972,7 @@ tok_nextc(struct tok_state *tok)
                 }
                 tok->buf = newbuf;
                 tok->cur = tok->buf + cur;
+                tok->multi_line_start = tok->buf + cur_multi_line_start;
                 tok->line_start = tok->cur;
                 tok->inp = tok->buf + curvalid;
                 tok->end = tok->buf + newsize;
@@ -1030,17 +1035,44 @@ tok_backup(struct tok_state *tok, int c)
 static int
 syntaxerror(struct tok_state *tok, const char *format, ...)
 {
+    PyObject *errmsg, *errtext, *args;
     va_list vargs;
 #ifdef HAVE_STDARG_PROTOTYPES
     va_start(vargs, format);
 #else
     va_start(vargs);
 #endif
-    PyErr_FormatV(PyExc_SyntaxError, format, vargs);
+    errmsg = PyUnicode_FromFormatV(format, vargs);
     va_end(vargs);
-    PyErr_SyntaxLocationObject(tok->filename,
-                               tok->lineno,
-                               (int)(tok->cur - tok->line_start));
+    if (!errmsg) {
+        goto error;
+    }
+
+    errtext = PyUnicode_DecodeUTF8(tok->line_start, tok->cur - tok->line_start,
+                                   "replace");
+    if (!errtext) {
+        goto error;
+    }
+    int offset = (int)PyUnicode_GET_LENGTH(errtext);
+    Py_ssize_t line_len = strcspn(tok->line_start, "\n");
+    if (line_len != tok->cur - tok->line_start) {
+        Py_DECREF(errtext);
+        errtext = PyUnicode_DecodeUTF8(tok->line_start, line_len,
+                                       "replace");
+    }
+    if (!errtext) {
+        goto error;
+    }
+
+    args = Py_BuildValue("(O(OiiN))", errmsg,
+                         tok->filename, tok->lineno, offset, errtext);
+    if (args) {
+        PyErr_SetObject(PyExc_SyntaxError, args);
+        Py_DECREF(args);
+    }
+
+error:
+    Py_XDECREF(errmsg);
     tok->done = E_ERROR;
     return ERRORTOKEN;
 }
@@ -1145,6 +1177,12 @@ tok_get(struct tok_state *tok, char **p_start, char **p_end)
                mode, which signal the end of a command group. */
             if (col == 0 && c == '\n' && tok->prompt != NULL) {
                 blankline = 0; /* Let it through */
+            }
+            else if (tok->prompt != NULL && tok->lineno == 1) {
+                /* In interactive mode, if the first line contains
+                   only spaces and/or a comment, let it through. */
+                blankline = 0;
+                col = altcol = 0;
             }
             else {
                 blankline = 1; /* Ignore completely */
@@ -1819,7 +1857,7 @@ PyTokenizer_FindEncodingFilename(int fd, PyObject *filename)
     if (tok->encoding) {
         encoding = (char *)PyMem_MALLOC(strlen(tok->encoding) + 1);
         if (encoding)
-        strcpy(encoding, tok->encoding);
+            strcpy(encoding, tok->encoding);
     }
     PyTokenizer_Free(tok);
     return encoding;

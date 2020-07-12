@@ -681,11 +681,8 @@ LLVM_PROF_MERGER
 PGO_PROF_USE_FLAG
 PGO_PROF_GEN_FLAG
 LLVM_AR_FOUND
-target_os
-target_vendor
-target_cpu
-target
 LLVM_AR
+PROFILE_TASK
 DEF_MAKE_RULE
 DEF_MAKE_ALL_RULE
 ABIFLAGS
@@ -785,6 +782,7 @@ infodir
 docdir
 oldincludedir
 includedir
+runstatedir
 localstatedir
 sharedstatedir
 sysconfdir
@@ -828,6 +826,7 @@ with_libs
 with_system_expat
 with_system_ffi
 with_system_libmpdec
+with_decimal_contextvar
 enable_loadable_sqlite_extensions
 with_tcltk_includes
 with_tcltk_libs
@@ -856,6 +855,7 @@ LDFLAGS
 LIBS
 CPPFLAGS
 CPP
+PROFILE_TASK
 PKG_CONFIG
 PKG_CONFIG_PATH
 PKG_CONFIG_LIBDIR'
@@ -897,6 +897,7 @@ datadir='${datarootdir}'
 sysconfdir='${prefix}/etc'
 sharedstatedir='${prefix}/com'
 localstatedir='${prefix}/var'
+runstatedir='${localstatedir}/run'
 includedir='${prefix}/include'
 oldincludedir='/usr/include'
 docdir='${datarootdir}/doc/${PACKAGE_TARNAME}'
@@ -1149,6 +1150,15 @@ do
   | -silent | --silent | --silen | --sile | --sil)
     silent=yes ;;
 
+  -runstatedir | --runstatedir | --runstatedi | --runstated \
+  | --runstate | --runstat | --runsta | --runst | --runs \
+  | --run | --ru | --r)
+    ac_prev=runstatedir ;;
+  -runstatedir=* | --runstatedir=* | --runstatedi=* | --runstated=* \
+  | --runstate=* | --runstat=* | --runsta=* | --runst=* | --runs=* \
+  | --run=* | --ru=* | --r=*)
+    runstatedir=$ac_optarg ;;
+
   -sbindir | --sbindir | --sbindi | --sbind | --sbin | --sbi | --sb)
     ac_prev=sbindir ;;
   -sbindir=* | --sbindir=* | --sbindi=* | --sbind=* | --sbin=* \
@@ -1286,7 +1296,7 @@ fi
 for ac_var in	exec_prefix prefix bindir sbindir libexecdir datarootdir \
 		datadir sysconfdir sharedstatedir localstatedir includedir \
 		oldincludedir docdir infodir htmldir dvidir pdfdir psdir \
-		libdir localedir mandir
+		libdir localedir mandir runstatedir
 do
   eval ac_val=\$$ac_var
   # Remove trailing slashes.
@@ -1439,6 +1449,7 @@ Fine tuning of the installation directories:
   --sysconfdir=DIR        read-only single-machine data [PREFIX/etc]
   --sharedstatedir=DIR    modifiable architecture-independent data [PREFIX/com]
   --localstatedir=DIR     modifiable single-machine data [PREFIX/var]
+  --runstatedir=DIR       modifiable per-process data [LOCALSTATEDIR/run]
   --libdir=DIR            object code libraries [EPREFIX/lib]
   --includedir=DIR        C header files [PREFIX/include]
   --oldincludedir=DIR     C header files for non-gcc [/usr/include]
@@ -1459,7 +1470,6 @@ _ACEOF
 System types:
   --build=BUILD     configure for building on BUILD [guessed]
   --host=HOST       cross-compile to build programs to run on HOST [BUILD]
-  --target=TARGET   configure for building compilers for TARGET [HOST]
 _ACEOF
 fi
 
@@ -1520,6 +1530,9 @@ Optional Packages:
   --with-system-ffi       build _ctypes module using an installed ffi library
   --with-system-libmpdec  build _decimal module using an installed libmpdec
                           library
+  --with-decimal-contextvar
+                          build _decimal module using a coroutine-local rather
+                          than a thread-local context (default is yes)
   --with-tcltk-includes='-I...'
                           override search for Tcl and Tk include files
   --with-tcltk-libs='-L...'
@@ -1559,6 +1572,8 @@ Some influential environment variables:
   CPPFLAGS    (Objective) C/C++ preprocessor flags, e.g. -I<include dir> if
               you have headers in a nonstandard directory <include dir>
   CPP         C preprocessor
+  PROFILE_TASK
+              Python args for PGO generation task
   PKG_CONFIG  path to pkg-config utility
   PKG_CONFIG_PATH
               directories to add to pkg-config's search path
@@ -3383,7 +3398,7 @@ $as_echo "#define _BSD_SOURCE 1" >>confdefs.h
   # has no effect, don't bother defining them
   Darwin/[6789].*)
     define_xopen_source=no;;
-  Darwin/1[0-9].*)
+  Darwin/[12][0-9].*)
     define_xopen_source=no;;
   # On AIX 4 and 5.1, mbstate_t is defined only when _XOPEN_SOURCE == 500 but
   # used in wcsnrtombs() and mbsnrtowcs() even if _XOPEN_SOURCE is not defined
@@ -3403,6 +3418,12 @@ $as_echo "#define _BSD_SOURCE 1" >>confdefs.h
   # On VxWorks, defining _XOPEN_SOURCE causes compile failures
   # in network headers still using system V types.
   VxWorks/*)
+    define_xopen_source=no
+    ;;
+
+  # On HP-UX, defining _XOPEN_SOURCE to 600 or greater hides
+  # chroot() and other functions
+  hp*|HP*)
     define_xopen_source=no
     ;;
 
@@ -6426,6 +6447,16 @@ else
   DEF_MAKE_RULE="all"
 fi
 
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking PROFILE_TASK" >&5
+$as_echo_n "checking PROFILE_TASK... " >&6; }
+if test -z "$PROFILE_TASK"
+then
+	PROFILE_TASK='-m test --pgo'
+fi
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $PROFILE_TASK" >&5
+$as_echo "$PROFILE_TASK" >&6; }
+
 # Make llvm-relatec checks work on systems where llvm tools are not installed with their
 # normal names in the default $PATH (ie: Ubuntu).  They exist under the
 # non-suffixed name in their versioned llvm directory.
@@ -6472,47 +6503,9 @@ if test "$Py_LTO" = 'true' ; then
   case $CC in
     *clang*)
 
-      { $as_echo "$as_me:${as_lineno-$LINENO}: checking target system type" >&5
-$as_echo_n "checking target system type... " >&6; }
-if ${ac_cv_target+:} false; then :
-  $as_echo_n "(cached) " >&6
-else
-  if test "x$target_alias" = x; then
-  ac_cv_target=$ac_cv_host
-else
-  ac_cv_target=`$SHELL "$ac_aux_dir/config.sub" $target_alias` ||
-    as_fn_error $? "$SHELL $ac_aux_dir/config.sub $target_alias failed" "$LINENO" 5
-fi
-
-fi
-{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $ac_cv_target" >&5
-$as_echo "$ac_cv_target" >&6; }
-case $ac_cv_target in
-*-*-*) ;;
-*) as_fn_error $? "invalid value of canonical target" "$LINENO" 5;;
-esac
-target=$ac_cv_target
-ac_save_IFS=$IFS; IFS='-'
-set x $ac_cv_target
-shift
-target_cpu=$1
-target_vendor=$2
-shift; shift
-# Remember, the first character of IFS is used to create $*,
-# except with old shells:
-target_os=$*
-IFS=$ac_save_IFS
-case $target_os in *\ *) target_os=`echo "$target_os" | sed 's/ /-/g'`;; esac
-
-
-# The aliases save the names the user supplied, while $host etc.
-# will get canonicalized.
-test -n "$target_alias" &&
-  test "$program_prefix$program_suffix$program_transform_name" = \
-    NONENONEs,x,x, &&
-  program_prefix=${target_alias}-
-# Extract the first word of "$target_alias-llvm-ar", so it can be a program name with args.
-set dummy $target_alias-llvm-ar; ac_word=$2
+      if test -n "$ac_tool_prefix"; then
+  # Extract the first word of "${ac_tool_prefix}llvm-ar", so it can be a program name with args.
+set dummy ${ac_tool_prefix}llvm-ar; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
 $as_echo_n "checking for $ac_word... " >&6; }
 if ${ac_cv_path_LLVM_AR+:} false; then :
@@ -6551,10 +6544,10 @@ $as_echo "no" >&6; }
 fi
 
 
+fi
 if test -z "$ac_cv_path_LLVM_AR"; then
-  if test "$build" = "$target"; then
-    ac_pt_LLVM_AR=$LLVM_AR
-    # Extract the first word of "llvm-ar", so it can be a program name with args.
+  ac_pt_LLVM_AR=$LLVM_AR
+  # Extract the first word of "llvm-ar", so it can be a program name with args.
 set dummy llvm-ar; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
 $as_echo_n "checking for $ac_word... " >&6; }
@@ -6581,7 +6574,6 @@ done
   done
 IFS=$as_save_IFS
 
-  test -z "$ac_cv_path_ac_pt_LLVM_AR" && ac_cv_path_ac_pt_LLVM_AR="''"
   ;;
 esac
 fi
@@ -6594,9 +6586,16 @@ else
 $as_echo "no" >&6; }
 fi
 
-    LLVM_AR=$ac_pt_LLVM_AR
-  else
+  if test "x$ac_pt_LLVM_AR" = x; then
     LLVM_AR="''"
+  else
+    case $cross_compiling:$ac_tool_warned in
+yes:)
+{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: using cross tools not prefixed with host triplet" >&5
+$as_echo "$as_me: WARNING: using cross tools not prefixed with host triplet" >&2;}
+ac_tool_warned=yes ;;
+esac
+    LLVM_AR=$ac_pt_LLVM_AR
   fi
 else
   LLVM_AR="$ac_cv_path_LLVM_AR"
@@ -6668,8 +6667,9 @@ fi
 
 
 
-# Extract the first word of "$target_alias-llvm-profdata", so it can be a program name with args.
-set dummy $target_alias-llvm-profdata; ac_word=$2
+if test -n "$ac_tool_prefix"; then
+  # Extract the first word of "${ac_tool_prefix}llvm-profdata", so it can be a program name with args.
+set dummy ${ac_tool_prefix}llvm-profdata; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
 $as_echo_n "checking for $ac_word... " >&6; }
 if ${ac_cv_path_LLVM_PROFDATA+:} false; then :
@@ -6708,10 +6708,10 @@ $as_echo "no" >&6; }
 fi
 
 
+fi
 if test -z "$ac_cv_path_LLVM_PROFDATA"; then
-  if test "$build" = "$target"; then
-    ac_pt_LLVM_PROFDATA=$LLVM_PROFDATA
-    # Extract the first word of "llvm-profdata", so it can be a program name with args.
+  ac_pt_LLVM_PROFDATA=$LLVM_PROFDATA
+  # Extract the first word of "llvm-profdata", so it can be a program name with args.
 set dummy llvm-profdata; ac_word=$2
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for $ac_word" >&5
 $as_echo_n "checking for $ac_word... " >&6; }
@@ -6738,7 +6738,6 @@ done
   done
 IFS=$as_save_IFS
 
-  test -z "$ac_cv_path_ac_pt_LLVM_PROFDATA" && ac_cv_path_ac_pt_LLVM_PROFDATA="''"
   ;;
 esac
 fi
@@ -6751,9 +6750,16 @@ else
 $as_echo "no" >&6; }
 fi
 
-    LLVM_PROFDATA=$ac_pt_LLVM_PROFDATA
-  else
+  if test "x$ac_pt_LLVM_PROFDATA" = x; then
     LLVM_PROFDATA="''"
+  else
+    case $cross_compiling:$ac_tool_warned in
+yes:)
+{ $as_echo "$as_me:${as_lineno-$LINENO}: WARNING: using cross tools not prefixed with host triplet" >&5
+$as_echo "$as_me: WARNING: using cross tools not prefixed with host triplet" >&2;}
+ac_tool_warned=yes ;;
+esac
+    LLVM_PROFDATA=$ac_pt_LLVM_PROFDATA
   fi
 else
   LLVM_PROFDATA="$ac_cv_path_LLVM_PROFDATA"
@@ -9524,6 +9530,14 @@ then
 	# -u libsys_s pulls in all symbols in libsys
 	Darwin/*)
 		LINKFORSHARED="$extra_undefs -framework CoreFoundation"
+
+		# Issue #18075: the default maximum stack size (8MBytes) is too
+		# small for the default recursion limit. Increase the stack size
+		# to ensure that tests don't crash
+		# Note: This matches the value of THREAD_STACK_SIZE in
+		# thread_pthread.h
+		LINKFORSHARED="-Wl,-stack_size,1000000 $LINKFORSHARED"
+
 		if test "$enable_framework"
 		then
 			LINKFORSHARED="$LINKFORSHARED "'$(PYTHONFRAMEWORKDIR)/Versions/$(VERSION)/$(PYTHONFRAMEWORK)'
@@ -10409,6 +10423,28 @@ fi
 { $as_echo "$as_me:${as_lineno-$LINENO}: result: $with_system_libmpdec" >&5
 $as_echo "$with_system_libmpdec" >&6; }
 
+# Check whether _decimal should use a coroutine-local or thread-local context
+{ $as_echo "$as_me:${as_lineno-$LINENO}: checking for --with-decimal-contextvar" >&5
+$as_echo_n "checking for --with-decimal-contextvar... " >&6; }
+
+# Check whether --with-decimal_contextvar was given.
+if test "${with_decimal_contextvar+set}" = set; then :
+  withval=$with_decimal_contextvar;
+else
+  with_decimal_contextvar="yes"
+fi
+
+
+if test "$with_decimal_contextvar" != "no"
+then
+
+$as_echo "#define WITH_DECIMAL_CONTEXTVAR 1" >>confdefs.h
+
+fi
+
+{ $as_echo "$as_me:${as_lineno-$LINENO}: result: $with_decimal_contextvar" >&5
+$as_echo "$with_decimal_contextvar" >&6; }
+
 # Check for support for loadable sqlite extensions
 { $as_echo "$as_me:${as_lineno-$LINENO}: checking for --enable-loadable-sqlite-extensions" >&5
 $as_echo_n "checking for --enable-loadable-sqlite-extensions... " >&6; }
@@ -10496,6 +10532,9 @@ then
     $as_echo "#define _REENTRANT 1" >>confdefs.h
 
     posix_threads=yes
+    if test "$ac_sys_system" = "SunOS"; then
+        CFLAGS="$CFLAGS -D_REENTRANT"
+    fi
 elif test "$ac_cv_kpthread" = "yes"
 then
     CC="$CC -Kpthread"
@@ -11466,13 +11505,13 @@ fi
 for ac_func in alarm accept4 setitimer getitimer bind_textdomain_codeset chown \
  clock confstr copy_file_range ctermid dup3 execv explicit_bzero explicit_memset \
  faccessat fchmod fchmodat fchown fchownat \
- fexecve fdopendir fork fpathconf fstatat ftime ftruncate futimesat \
+ fdwalk fexecve fdopendir fork fpathconf fstatat ftime ftruncate futimesat \
  futimens futimes gai_strerror getentropy \
  getgrgid_r getgrnam_r \
  getgrouplist getgroups getlogin getloadavg getpeername getpgid getpid \
  getpriority getresuid getresgid getpwent getpwnam_r getpwuid_r getspnam getspent getsid getwd \
  if_nameindex \
- initgroups kill killpg lchmod lchown lockf linkat lstat lutimes mmap \
+ initgroups kill killpg lchown lockf linkat lstat lutimes mmap \
  memrchr mbrtowc mkdirat mkfifo \
  madvise mkfifoat mknod mknodat mktime mremap nice openat pathconf pause pipe2 plock poll \
  posix_fallocate posix_fadvise posix_spawn posix_spawnp pread preadv preadv2 \
@@ -14264,10 +14303,10 @@ _ACEOF
 if ac_fn_c_try_compile "$LINENO"; then :
 
 
-if grep noonsees conftest.$ac_objext >/dev/null ; then
+if $GREP noonsees conftest.$ac_objext >/dev/null ; then
   ax_cv_c_float_words_bigendian=yes
 fi
-if grep seesnoon conftest.$ac_objext >/dev/null ; then
+if $GREP seesnoon conftest.$ac_objext >/dev/null ; then
   if test "$ax_cv_c_float_words_bigendian" = unknown; then
     ax_cv_c_float_words_bigendian=no
   else
@@ -16758,9 +16797,12 @@ cat confdefs.h - <<_ACEOF >conftest.$ac_ext
 
 
     #include <stdatomic.h>
-    atomic_int value = ATOMIC_VAR_INIT(1);
+    atomic_int int_var;
+    atomic_uintptr_t uintptr_var;
     int main() {
-      int loaded_value = atomic_load(&value);
+      atomic_store_explicit(&int_var, 5, memory_order_relaxed);
+      atomic_store_explicit(&uintptr_var, 0, memory_order_relaxed);
+      int loaded_value = atomic_load_explicit(&int_var, memory_order_seq_cst);
       return 0;
     }
 
